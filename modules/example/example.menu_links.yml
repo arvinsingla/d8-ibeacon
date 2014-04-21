@@ -1,0 +1,5 @@
+example.admin:
+  title: Example Settings
+  description: 'Manage example settings for your site'
+  parent: system.admin_config_development
+  route_name: example.admin
