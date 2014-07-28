@@ -21,6 +21,8 @@ use Drupal\Component\Annotation\Plugin;
  *
  * @see \Drupal\Core\Field\WidgetPluginManager
  * @see \Drupal\Core\Field\WidgetInterface
+ *
+ * @ingroup field_widget
  */
 class FieldWidget extends Plugin {
 
@@ -64,14 +66,6 @@ class FieldWidget extends Plugin {
    * @var array
    */
   public $field_types = array();
-
-  /**
-   * An array whose keys are the names of the settings available to the widget
-   * type, and whose values are the default values for those settings.
-   *
-   * @var array
-   */
-  public $settings = array();
 
   /**
    * Does the field widget handles multiple values at once.

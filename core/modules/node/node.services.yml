@@ -1,4 +1,8 @@
 services:
+  node.route_subscriber:
+    class: Drupal\node\Routing\RouteSubscriber
+    tags:
+      - { name: event_subscriber }
   node.grant_storage:
     class: Drupal\node\NodeGrantDatabaseStorage
     arguments: ['@database', '@module_handler']
@@ -12,3 +16,8 @@ services:
     arguments: ['@entity.manager']
     tags:
       - { name: access_check, applies_to: _node_add_access }
+  node.admin_path.route_subscriber:
+    class: Drupal\node\EventSubscriber\NodeAdminRouteSubscriber
+    arguments: ['@config.factory']
+    tags:
+      - { name: event_subscriber }

@@ -20,8 +20,23 @@ use Drupal\user;
  * the static method propertyDefinitions().
  *
  * @see \Drupal\Core\Field\FieldItemInterface
+ * @ingroup field_types
  */
 abstract class FieldItemBase extends Map implements FieldItemInterface {
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function defaultSettings() {
+    return array();
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function defaultInstanceSettings() {
+    return array();
+  }
 
   /**
    * {@inheritdoc}
@@ -229,7 +244,7 @@ abstract class FieldItemBase extends Map implements FieldItemInterface {
   /**
    * {@inheritdoc}
    */
-  public function settingsForm(array $form, array &$form_state, $has_data) {
+  public function settingsForm(array &$form, array &$form_state, $has_data) {
     return array();
   }
 

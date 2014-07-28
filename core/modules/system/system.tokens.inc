@@ -7,6 +7,9 @@
  * This file handles tokens for the global 'site' and 'date' tokens.
  */
 
+use Drupal\Component\Utility\String;
+use Drupal\Component\Utility\Xss;
+
 /**
  * Implements hook_token_info().
  */
@@ -104,12 +107,12 @@ function system_tokens($type, $tokens, array $data = array(), array $options = a
       switch ($name) {
         case 'name':
           $site_name = \Drupal::config('system.site')->get('name');
-          $replacements[$original] = $sanitize ? check_plain($site_name) : $site_name;
+          $replacements[$original] = $sanitize ? String::checkPlain($site_name) : $site_name;
           break;
 
         case 'slogan':
           $slogan = \Drupal::config('system.site')->get('slogan');
-          $replacements[$original] = $sanitize ? filter_xss_admin($slogan) : $slogan;
+          $replacements[$original] = $sanitize ? Xss::filterAdmin($slogan) : $slogan;
           break;
 
         case 'mail':
@@ -158,7 +161,7 @@ function system_tokens($type, $tokens, array $data = array(), array $options = a
           break;
 
         case 'raw':
-          $replacements[$original] = $sanitize ? check_plain($date) : $date;
+          $replacements[$original] = $sanitize ? String::checkPlain($date) : $date;
           break;
       }
     }

@@ -5,18 +5,19 @@
  * Defines selection, check box and radio button widgets for text and numeric fields.
  */
 
-use Drupal\Component\Utility\NestedArray;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Field\FieldDefinitionInterface;
+use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\Core\Entity\Exception\FieldStorageDefinitionUpdateForbiddenException;
 use Drupal\field\FieldConfigInterface;
 use Drupal\field\FieldConfigUpdateForbiddenException;
 
 /**
  * Implements hook_help().
  */
-function options_help($path, $arg) {
-  switch ($path) {
-    case 'admin/help#options':
+function options_help($route_name, RouteMatchInterface $route_match) {
+  switch ($route_name) {
+    case 'help.page.options':
       $output = '';
       $output .= '<h3>' . t('About') . '</h3>';
       $output .= '<p>' . t('The Options module allows you to create fields where data values are selected from a fixed list of options. Usually these items are entered through a select list, checkboxes, or radio buttons. See the <a href="!field">Field module help</a> and the <a href="!field_ui">Field UI help</a> pages for general information on fields and how to create and manage them. For more information, see the <a href="!options_do">online documentation for the Options module</a>.', array('!field' => \Drupal::url('help.page', array('name' => 'field')), '!field_ui' => \Drupal::url('help.page', array('name' => 'field_ui')), '!options_do' => 'https://drupal.org/documentation/modules/options')) . '</p>';
@@ -31,15 +32,6 @@ function options_help($path, $arg) {
       $output .= '</dl>';
       return $output;
   }
-}
-
-/**
-* Form element #value_callback: assembles the allowed values for 'boolean' fields.
-*/
-function options_field_settings_form_value_boolean_allowed_values($element, $input, $form_state) {
-  $on = NestedArray::getValue($form_state['input'], $element['#on_parents']);
-  $off = NestedArray::getValue($form_state['input'], $element['#off_parents']);
-  return array($off, $on);
 }
 
 /**
@@ -109,7 +101,7 @@ function options_field_config_update_forbid(FieldConfigInterface $field, FieldCo
     $prior_allowed_values = $prior_field->getSetting('allowed_values');
     $lost_keys = array_diff(array_keys($prior_allowed_values), array_keys($allowed_values));
     if (_options_values_in_use($field->entity_type, $field->getName(), $lost_keys)) {
-      throw new FieldConfigUpdateForbiddenException(t('A list field (@field_name) with existing data cannot have its keys changed.', array('@field_name' => $field->getName())));
+      throw new FieldStorageDefinitionUpdateForbiddenException(t('A list field (@field_name) with existing data cannot have its keys changed.', array('@field_name' => $field->getName())));
     }
   }
 }

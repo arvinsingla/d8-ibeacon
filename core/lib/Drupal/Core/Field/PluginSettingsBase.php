@@ -24,6 +24,15 @@ abstract class PluginSettingsBase extends PluginBase implements PluginSettingsIn
   protected $settings = array();
 
   /**
+   * The plugin settings injected by third party modules.
+   *
+   * @see hooks
+   *
+   * @var array
+   */
+  protected $thirdPartySettings = array();
+
+  /**
    * Whether default settings have been merged into the current $settings.
    *
    * @var bool
@@ -31,7 +40,14 @@ abstract class PluginSettingsBase extends PluginBase implements PluginSettingsIn
   protected $defaultSettingsMerged = FALSE;
 
   /**
-   * Implements Drupal\field\Plugin\PluginSettingsInterface::getSettings().
+   * {@inheritdoc}
+   */
+  public static function defaultSettings() {
+    return array();
+  }
+
+  /**
+   * {@inheritdoc}
    */
   public function getSettings() {
     // Merge defaults before returning the array.
@@ -42,7 +58,7 @@ abstract class PluginSettingsBase extends PluginBase implements PluginSettingsIn
   }
 
   /**
-   * Implements Drupal\field\Plugin\PluginSettingsInterface::getSetting().
+   * {@inheritdoc}
    */
   public function getSetting($key) {
     // Merge defaults if we have no value for the key.
@@ -56,20 +72,12 @@ abstract class PluginSettingsBase extends PluginBase implements PluginSettingsIn
    * Merges default settings values into $settings.
    */
   protected function mergeDefaults() {
-    $this->settings += $this->getDefaultSettings();
+    $this->settings += static::defaultSettings();
     $this->defaultSettingsMerged = TRUE;
   }
 
   /**
-   * Implements Drupal\field\Plugin\PluginSettingsInterface::getDefaultSettings().
-   */
-  public function getDefaultSettings() {
-    $definition = $this->getPluginDefinition();
-    return $definition['settings'];
-  }
-
-  /**
-   * Implements Drupal\field\Plugin\PluginSettingsInterface::setSettings().
+   * {@inheritdoc}
    */
   public function setSettings(array $settings) {
     $this->settings = $settings;
@@ -78,10 +86,25 @@ abstract class PluginSettingsBase extends PluginBase implements PluginSettingsIn
   }
 
   /**
-   * Implements Drupal\field\Plugin\PluginSettingsInterface::setSetting().
+   * {@inheritdoc}
    */
   public function setSetting($key, $value) {
     $this->settings[$key] = $value;
+    return $this;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getThirdPartySetting($module, $key, $default = NULL) {
+    return isset($this->thirdPartySettings[$module][$key]) ? $this->thirdPartySettings[$module][$key] : $default;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function setThirdPartySetting($module, $key, $value) {
+    $this->thirdPartySettings[$module][$key] = $value;
     return $this;
   }
 

@@ -99,7 +99,7 @@ function hook_file_insert(Drupal\file\FileInterface $file) {
   // Add a message to the log, if the file is a jpg
   $validate = file_validate_extensions($file, 'jpg');
   if (empty($validate)) {
-    watchdog('file', 'A jpg has been added.');
+    \Drupal::logger('file')->notice('A jpg has been added.');
   }
 }
 
@@ -118,7 +118,7 @@ function hook_file_update(Drupal\file\FileInterface $file) {
     $file->setFilename($file->getOwner()->name . '_' . $file->getFilename());
     $file->save();
 
-    watchdog('file', t('%source has been renamed to %destination', array('%source' => $old_filename, '%destination' => $file->getFilename())));
+    \Drupal::logger('file')->notice('%source has been renamed to %destination', array('%source' => $old_filename, '%destination' => $file->getFilename()));
   }
 }
 
@@ -138,7 +138,7 @@ function hook_file_copy(Drupal\file\FileInterface $file, Drupal\file\FileInterfa
     $file->setFilename($file->getOwner()->name . '_' . $file->getFilename());
     $file->save();
 
-    watchdog('file', t('Copied file %source has been renamed to %destination', array('%source' => $source->filename, '%destination' => $file->getFilename())));
+    \Drupal::logger('file')->notice('Copied file %source has been renamed to %destination', array('%source' => $source->filename, '%destination' => $file->getFilename()));
   }
 }
 
@@ -158,7 +158,7 @@ function hook_file_move(Drupal\file\FileInterface $file, Drupal\file\FileInterfa
     $file->setFilename($file->getOwner()->name . '_' . $file->getFilename());
     $file->save();
 
-    watchdog('file', t('Moved file %source has been renamed to %destination', array('%source' => $source->filename, '%destination' => $file->getFilename())));
+    \Drupal::logger('file')->notice('Moved file %source has been renamed to %destination', array('%source' => $source->filename, '%destination' => $file->getFilename()));
   }
 }
 
@@ -172,7 +172,7 @@ function hook_file_move(Drupal\file\FileInterface $file, Drupal\file\FileInterfa
  *   The file that is about to be deleted.
  *
  * @see hook_file_delete()
- * @see \Drupal\file\FileStorageController::delete()
+ * @see \Drupal\file\FileStorage::delete()
  * @see upload_file_delete()
  */
 function hook_file_predelete(Drupal\file\FileInterface $file) {
@@ -190,7 +190,7 @@ function hook_file_predelete(Drupal\file\FileInterface $file) {
  *   The file that has just been deleted.
  *
  * @see hook_file_predelete()
- * @see \Drupal\file\FileStorageController::delete()
+ * @see \Drupal\file\FileStorage::delete()
  */
 function hook_file_delete(Drupal\file\FileInterface $file) {
   // Delete all information associated with the file.

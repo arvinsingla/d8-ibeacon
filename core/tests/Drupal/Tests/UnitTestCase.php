@@ -14,6 +14,8 @@ use Drupal\Core\DependencyInjection\ContainerBuilder;
 
 /**
  * Provides a base class and helpers for Drupal unit tests.
+ *
+ * @ingroup testing
  */
 abstract class UnitTestCase extends \PHPUnit_Framework_TestCase {
 
@@ -83,6 +85,18 @@ abstract class UnitTestCase extends \PHPUnit_Framework_TestCase {
     return $this->randomGenerator;
   }
 
+  /**
+   * Asserts if two arrays are equal by sorting them first.
+   *
+   * @param array $expected
+   * @param array $actual
+   * @param string $message
+   */
+  protected function assertArrayEquals(array $expected, array $actual, $message = NULL) {
+    ksort($expected);
+    ksort($actual);
+    $this->assertEquals($expected, $actual, $message);
+  }
 
   /**
    * Returns a stub config factory that behaves according to the passed in array.
@@ -216,6 +230,27 @@ abstract class UnitTestCase extends \PHPUnit_Framework_TestCase {
 
     \Drupal::setContainer($container);
     return $container;
+  }
+
+  /**
+   * Returns a stub class resolver.
+   *
+   * @return \Drupal\Core\DependencyInjection\ClassResolverInterface|\PHPUnit_Framework_MockObject_MockObject
+   *   The class resolver stub.
+   */
+  protected function getClassResolverStub() {
+    $class_resolver = $this->getMock('Drupal\Core\DependencyInjection\ClassResolverInterface');
+    $class_resolver->expects($this->any())
+      ->method('getInstanceFromDefinition')
+      ->will($this->returnCallback(function ($class) {
+        if (is_subclass_of($class, 'Drupal\Core\DependencyInjection\ContainerInjectionInterface')) {
+          return $class::create(new ContainerBuilder());
+        }
+        else {
+          return new $class();
+        }
+      }));
+    return $class_resolver;
   }
 
 }

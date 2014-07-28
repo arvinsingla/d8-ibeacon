@@ -7,7 +7,7 @@
 
 namespace Drupal\Core\Field;
 
-use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Field\TypedData\FieldItemDataDefinition;
 use Drupal\Core\TypedData\ListDataDefinition;
 use Drupal\field\FieldException;
@@ -15,7 +15,7 @@ use Drupal\field\FieldException;
 /**
  * A class for defining entity fields.
  */
-class FieldDefinition extends ListDataDefinition implements FieldDefinitionInterface {
+class FieldDefinition extends ListDataDefinition implements FieldDefinitionInterface, FieldStorageDefinitionInterface {
 
   /**
    * The field type.
@@ -65,6 +65,37 @@ class FieldDefinition extends ListDataDefinition implements FieldDefinitionInter
     $default_settings = $field_type_manager->getDefaultSettings($type) + $field_type_manager->getDefaultInstanceSettings($type);
     $field_definition->itemDefinition->setSettings($default_settings);
     return $field_definition;
+  }
+
+  /**
+   * Creates a new field definition based upon a field storage definition.
+   *
+   * In cases where one needs a field storage definitions to act like full
+   * field definitions, this creates a new field definition based upon the
+   * (limited) information available. That way it is possible to use the field
+   * definition in places where a full field definition is required; e.g., with
+   * widgets or formatters.
+   *
+   * @param \Drupal\Core\Field\FieldStorageDefinitionInterface $definition
+   *   The field storage definition to base the new field definition upon.
+   *
+   * @return $this
+   */
+  public static function createFromFieldStorageDefinition(FieldStorageDefinitionInterface $definition) {
+    return static::create($definition->getType())
+      ->setCardinality($definition->getCardinality())
+      ->setConstraints($definition->getConstraints())
+      ->setCustomStorage($definition->hasCustomStorage())
+      ->setDescription($definition->getDescription())
+      ->setLabel($definition->getLabel())
+      ->setName($definition->getName())
+      ->setProvider($definition->getProvider())
+      ->setQueryable($definition->isQueryable())
+      ->setRequired($definition->isRequired())
+      ->setRevisionable($definition->isRevisionable())
+      ->setSettings($definition->getSettings())
+      ->setTargetEntityTypeId($definition->getTargetEntityTypeId())
+      ->setTranslatable($definition->isTranslatable());
   }
 
   /**
@@ -151,6 +182,26 @@ class FieldDefinition extends ListDataDefinition implements FieldDefinitionInter
   /**
    * {@inheritdoc}
    */
+  public function getProvider() {
+    return $this->definition['provider'];
+  }
+
+  /**
+   * Sets the name of the provider of this field.
+   *
+   * @param string $provider
+   *   The provider name to set.
+   *
+   * @return $this
+   */
+  public function setProvider($provider) {
+    $this->definition['provider'] = $provider;
+    return $this;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
   public function isTranslatable() {
     return !empty($this->definition['translatable']);
   }
@@ -161,11 +212,32 @@ class FieldDefinition extends ListDataDefinition implements FieldDefinitionInter
    * @param bool $translatable
    *   Whether the field is translatable.
    *
-   * @return static
+   * @return $this
    *   The object itself for chaining.
    */
   public function setTranslatable($translatable) {
     $this->definition['translatable'] = $translatable;
+    return $this;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function isRevisionable() {
+    return !empty($this->definition['revisionable']);
+  }
+
+  /**
+   * Sets whether the field is revisionable.
+   *
+   * @param bool $revisionable
+   *   Whether the field is revisionable.
+   *
+   * @return $this
+   *   The object itself for chaining.
+   */
+  public function setRevisionable($revisionable) {
+    $this->definition['revisionable'] = $revisionable;
     return $this;
   }
 
@@ -181,7 +253,7 @@ class FieldDefinition extends ListDataDefinition implements FieldDefinitionInter
    * Sets the maximum number of items allowed for the field.
    *
    * Possible values are positive integers or
-   * FieldDefinitionInterface::CARDINALITY_UNLIMITED.
+   * FieldStorageDefinitionInterface::CARDINALITY_UNLIMITED.
    *
    * @param int $cardinality
    *  The field cardinality.
@@ -306,15 +378,57 @@ class FieldDefinition extends ListDataDefinition implements FieldDefinitionInter
   /**
    * {@inheritdoc}
    */
-  public function isConfigurable() {
-    return FALSE;
+  public function getDefaultValue(ContentEntityInterface $entity) {
+    // Allow custom default values function.
+    if (!empty($this->definition['default_value_callback'])) {
+      $value = call_user_func($this->definition['default_value_callback'], $entity, $this);
+    }
+    else {
+      $value = isset($this->definition['default_value']) ? $this->definition['default_value'] : NULL;
+    }
+    // Allow the field type to process default values.
+    $field_item_list_class = $this->getClass();
+    return $field_item_list_class::processDefaultValue($value, $entity, $this);
   }
 
   /**
-   * {@inheritdoc}
+   * Sets a custom default value callback.
+   *
+   * If set, the callback overrides any set default value.
+   *
+   * @param callable|null $callback
+   *   The callback to invoke for getting the default value (pass NULL to unset
+   *   a previously set callback). The callback will be invoked with the
+   *   following arguments:
+   *   - \Drupal\Core\Entity\ContentEntityInterface $entity
+   *     The entity being created.
+   *   - \Drupal\Core\Field\FieldDefinitionInterface $definition
+   *     The field definition.
+   *   It should return the default value as documented by
+   *   \Drupal\Core\Field\FieldDefinitionInterface::getDefaultValue().
+   *
+   * @return $this
    */
-  public function getDefaultValue(EntityInterface $entity) {
-    return $this->getSetting('default_value');
+  public function setDefaultValueCallback($callback) {
+    $this->definition['default_value_callback'] = $callback;
+    return $this;
+  }
+
+  /**
+   * Sets a default value.
+   *
+   * Note that if a default value callback is set, it will take precedence over
+   * any value set here.
+   *
+   * @param mixed $value
+   *   The default value in the format as returned by
+   *   \Drupal\Core\Field\FieldDefinitionInterface::getDefaultValue().
+   *
+   * @return $this
+   */
+  public function setDefaultValue($value) {
+    $this->definition['default_value'] = $value;
+    return $this;
   }
 
   /**
@@ -395,11 +509,30 @@ class FieldDefinition extends ListDataDefinition implements FieldDefinitionInter
    * @param string $entity_type_id
    *   The name of the target entity type to set.
    *
-   * @return static
-   *   The object itself for chaining.
+   * @return $this
    */
   public function setTargetEntityTypeId($entity_type_id) {
     $this->definition['entity_type'] = $entity_type_id;
+    return $this;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getBundle() {
+    return isset($this->definition['bundle']) ? $this->definition['bundle'] : NULL;
+  }
+
+  /**
+   * Sets the bundle this field is defined for.
+   *
+   * @param string|null $bundle
+   *   The bundle, or NULL if the field is not bundle-specific.
+   *
+   * @return $this
+   */
+  public function setBundle($bundle) {
+    $this->definition['bundle'] = $bundle;
     return $this;
   }
 
@@ -412,8 +545,13 @@ class FieldDefinition extends ListDataDefinition implements FieldDefinitionInter
       $definition = \Drupal::service('plugin.manager.field.field_type')->getDefinition($this->getType());
       $class = $definition['class'];
       $schema = $class::schema($this);
-      // Fill in default values for optional entries.
-      $schema += array('indexes' => array(), 'foreign keys' => array());
+      // Fill in default values.
+      $schema += array(
+        'columns' => array(),
+        'unique keys' => array(),
+        'indexes' => array(),
+        'foreign keys' => array(),
+      );
 
       // Check that the schema does not include forbidden column names.
       if (array_intersect(array_keys($schema['columns']), static::getReservedColumns())) {
@@ -451,6 +589,47 @@ class FieldDefinition extends ListDataDefinition implements FieldDefinitionInter
    */
   public static function getReservedColumns() {
     return array('deleted');
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function hasCustomStorage() {
+    return !empty($this->definition['custom_storage']) || $this->isComputed();
+  }
+
+  /**
+   * Sets the storage behavior for this field.
+   *
+   * @param bool $custom_storage
+   *   Pass FALSE if the storage takes care of storing the field,
+   *   TRUE otherwise.
+   *
+   * @return $this
+   *
+   * @throws \LogicException
+   *   Thrown if custom storage is to be set to FALSE for a computed field.
+   */
+  public function setCustomStorage($custom_storage) {
+    if (!$custom_storage && $this->isComputed()) {
+      throw new \LogicException("Entity storage cannot store a computed field.");
+    }
+    $this->definition['custom_storage'] = $custom_storage;
+    return $this;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getFieldStorageDefinition() {
+    return $this;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getUniqueStorageIdentifier() {
+    return $this->getTargetEntityTypeId() . '-' . $this->getName();
   }
 
 }

@@ -11,6 +11,8 @@ use Drupal\Component\Plugin\PluginManagerInterface;
 
 /**
  * Defines an interface for the field type plugin manager.
+ *
+ * @ingroup field_types
  */
 interface FieldTypePluginManagerInterface extends PluginManagerInterface {
 
@@ -39,11 +41,11 @@ interface FieldTypePluginManagerInterface extends PluginManagerInterface {
   public function getDefaultSettings($type);
 
   /**
-   * Gets the definition of all field types that are configurable.
+   * Gets the definition of all field types that can be added via UI.
    *
    * @return array
    *   An array of field type definitions.
    */
-  public function getConfigurableDefinitions();
+  public function getUiDefinitions();
 
 }

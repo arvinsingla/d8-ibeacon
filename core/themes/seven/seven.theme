@@ -5,7 +5,7 @@
  * Functions to support theming in the Seven theme.
  */
 
-use Drupal\Core\Template\RenderWrapper;
+use Drupal\Component\Utility\Xss;
 use Drupal\Component\Utility\String;
 
 /**
@@ -19,11 +19,11 @@ function seven_preprocess_page(&$variables) {
   // Add information about the number of sidebars.
 
   if (!empty($variables['page']['sidebar_first'])) {
-    $classes[] = 'one-sidebar';
-    $classes[] = 'sidebar-first';
+    $classes[] = 'layout-one-sidebar';
+    $classes[] = 'layout-sidebar-first';
   }
   else {
-    $classes[] = 'no-sidebars';
+    $classes[] = 'layout-no-sidebars';
   }
   $attributes['class'] = $classes;
 
@@ -39,8 +39,7 @@ function seven_preprocess_page(&$variables) {
  * Overrides theme_menu_local_tasks().
  *
  * Returns HTML for primary and secondary local tasks.
- *
- **/
+ */
 function seven_menu_local_tasks(&$variables) {
   $output = '';
 
@@ -79,8 +78,7 @@ function seven_menu_local_tasks(&$variables) {
  * Overrides theme_menu_local_task().
  *
  * Returns HTML for a local task.
- *
- **/
+ */
 function seven_menu_local_task($variables) {
   $link = $variables['element']['#link'];
   $link += array(
@@ -120,8 +118,8 @@ function seven_node_add_list($variables) {
     $output = '<ul class="admin-list">';
     foreach ($content as $type) {
       $output .= '<li class="clearfix">';
-      $content = '<span class="label">' . check_plain($type->name) . '</span>';
-      $content .= '<div class="description">' . filter_xss_admin($type->description) . '</div>';
+      $content = '<span class="label">' . String::checkPlain($type->name) . '</span>';
+      $content .= '<div class="description">' . Xss::filterAdmin($type->description) . '</div>';
       $options['html'] = TRUE;
       $output .= l($content, 'node/add/' . $type->type, $options);
       $output .= '</li>';
@@ -135,21 +133,21 @@ function seven_node_add_list($variables) {
 }
 
 /**
- * Overrides theme_custom_block_add_list().
+ * Overrides theme_block_content_add_list().
  *
  * Displays the list of available custom block types for creation.
  */
-function seven_custom_block_add_list($variables) {
+function seven_block_content_add_list($variables) {
   $output = '';
   if (!empty($variables['types'])) {
     $output = '<ul class="admin-list">';
     foreach ($variables['types'] as $id => $type) {
       $output .= '<li class="clearfix">';
-      $content = '<span class="label">' . check_plain($type['title']) . '</span>';
-      $content .= '<div class="description">' . filter_xss_admin($type['description']) . '</div>';
+      $content = '<span class="label">' . String::checkPlain($type['title']) . '</span>';
+      $content .= '<div class="description">' . Xss::filterAdmin($type['description']) . '</div>';
       $options = $type['localized_options'];
       $options['html'] = TRUE;
-      $output .= \Drupal::l($content, 'custom_block.add_form', array('custom_block_type' => $id), $options);
+      $output .= \Drupal::l($content, 'block_content.add_form', array('block_content_type' => $id), $options);
       $output .= '</li>';
     }
     $output .= '</ul>';
@@ -169,11 +167,11 @@ function seven_admin_block_content($variables) {
     $output = system_admin_compact_mode() ? '<ul class="admin-list compact">' : '<ul class="admin-list">';
     foreach ($content as $item) {
       $output .= '<li>';
-      $content = '<span class="label">' . filter_xss_admin($item['title']) . '</span>';
+      $content = '<span class="label">' . Xss::filterAdmin($item['title']) . '</span>';
       $options = $item['localized_options'];
       $options['html'] = TRUE;
       if (isset($item['description']) && !system_admin_compact_mode()) {
-        $content .= '<div class="description">' . filter_xss_admin($item['description']) . '</div>';
+        $content .= '<div class="description">' . Xss::filterAdmin($item['description']) . '</div>';
       }
       $output .= l($content, $item['link_path'], $options);
       $output .= '</li>';
@@ -269,12 +267,44 @@ function seven_element_info_alter(&$type) {
  * Implements hook_preprocess_install_page().
  */
 function seven_preprocess_install_page(&$variables) {
-  $variables['styles'] = new RenderWrapper('drupal_get_css');
-  $variables['scripts'] = new RenderWrapper('drupal_get_js');
+  $page_object = $variables['page']['#page'];
+  $attributes = $page_object->getHtmlAttributes();
+  $classes = $attributes['class'];
+  $classes[] = 'install-background';
+  $attributes['class'] = $classes;
 
   // Normally we could attach libraries via hook_page_alter(), but when the
   // database is inactive it's not called so we add them here.
-  $libraries['#attached']['library'][] = 'seven/install-page';
+  $libraries = array(
+    '#attached' => array(
+      'library' => array(
+        'seven/maintenance-page',
+        'seven/install-page',
+      ),
+    ),
+  );
+  drupal_render($libraries);
+}
+
+/**
+ * Implements hook_preprocess_maintenance_page().
+ */
+function seven_preprocess_maintenance_page(&$variables) {
+  $page_object = $variables['page']['#page'];
+  $attributes = $page_object->getHtmlAttributes();
+  $classes = $attributes['class'];
+  $classes[] = 'maintenance-background';
+  $attributes['class'] = $classes;
+
+  // // Normally we could attach libraries via hook_page_alter(), but when the
+  // // database is inactive it's not called so we add them here.
+  $libraries = array(
+    '#attached' => array(
+      'library' => array(
+        'seven/maintenance-page',
+      ),
+    ),
+  );
   drupal_render($libraries);
 }
 
@@ -293,7 +323,7 @@ function seven_form_node_form_alter(&$form, &$form_state) {
   );
 
   $form['advanced']['#type'] = 'container';
-  $form['meta'] = array (
+  $form['meta'] = array(
     '#attributes' => array('class' => array('entity-meta-header')),
     '#type' => 'container',
     '#group' => 'advanced',

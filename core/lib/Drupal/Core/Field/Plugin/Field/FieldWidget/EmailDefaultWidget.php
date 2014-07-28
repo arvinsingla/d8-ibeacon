@@ -15,16 +15,22 @@ use Drupal\Core\Field\WidgetBase;
  *
  * @FieldWidget(
  *   id = "email_default",
- *   label = @Translation("E-mail"),
+ *   label = @Translation("Email"),
  *   field_types = {
  *     "email"
- *   },
- *   settings = {
- *     "placeholder" = ""
  *   }
  * )
  */
 class EmailDefaultWidget extends WidgetBase {
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function defaultSettings() {
+    return array(
+      'placeholder' => '',
+    ) + parent::defaultSettings();
+  }
 
   /**
    * {@inheritdoc}

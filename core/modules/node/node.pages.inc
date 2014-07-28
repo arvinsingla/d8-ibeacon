@@ -9,6 +9,7 @@
  * @see node_menu()
  */
 
+use Drupal\Component\Utility\Xss;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Drupal\node\NodeInterface;
 
@@ -30,7 +31,7 @@ function template_preprocess_node_add_list(&$variables) {
       $variables['types'][$type->type] = array(
         'type' => $type->type,
         'add_link' => l($type->name, 'node/add/' . $type->type),
-        'description' => filter_xss_admin($type->description),
+        'description' => Xss::filterAdmin($type->description),
       );
     }
   }
@@ -76,7 +77,7 @@ function node_preview(NodeInterface $node, array &$form_state) {
  *   An associative array containing:
  *   - node: The node entity which is being previewed.
  *
- * @see NodeFormController::preview()
+ * @see NodeForm::preview()
  * @see node_preview()
  */
 function template_preprocess_node_preview(&$variables) {
@@ -99,89 +100,4 @@ function template_preprocess_node_preview(&$variables) {
   else {
     $variables['preview_teaser'] = FALSE;
   }
-}
-
-/**
- * Page callback: Generates an overview table of older revisions of a node.
- *
- * @param object $node
- *   A node object.
- *
- * @return array
- *   An array as expected by drupal_render().
- *
- * @see node_menu()
- *
- * @deprecated in Drupal 8.x-dev, will be removed before Drupal 8.0.
- *   Use \Drupal\node\Controller\NodeController::revisionOverview().
- */
-function node_revision_overview($node) {
-  $build['#title'] = t('Revisions for %title', array('%title' => $node->label()));
-
-  $header = array(t('Revision'), t('Operations'));
-
-  $revisions = node_revision_list($node);
-
-  $rows = array();
-  $type = $node->getType();
-
-  $revert_permission = FALSE;
-  if ((user_access("revert $type revisions") || user_access('revert all revisions') || user_access('administer nodes')) && $node->access('update')) {
-    $revert_permission = TRUE;
-  }
-  $delete_permission = FALSE;
-  if ((user_access("delete $type revisions") || user_access('delete all revisions') || user_access('administer nodes')) && $node->access('delete')) {
-    $delete_permission = TRUE;
-  }
-  foreach ($revisions as $revision) {
-    $row = array();
-    if ($revision->current_vid > 0) {
-      $username = array(
-        '#theme' => 'username',
-        '#account' => user_load($revision->uid),
-      );
-      $row[] = array('data' => t('!date by !username', array('!date' => l(format_date($revision->revision_timestamp, 'short'), 'node/' . $node->id()), '!username' => drupal_render($username)))
-                               . (($revision->log != '') ? '<p class="revision-log">' . filter_xss($revision->log) . '</p>' : ''),
-                     'class' => array('revision-current'));
-      $row[] = array('data' => drupal_placeholder(t('current revision')), 'class' => array('revision-current'));
-    }
-    else {
-      $username = array(
-        '#theme' => 'username',
-        '#account' => user_load($revision->uid),
-      );
-      $row[] = t('!date by !username', array('!date' => l(format_date($revision->revision_timestamp, 'short'), "node/" . $node->id() . "/revisions/" . $revision->vid . "/view"), '!username' => drupal_render($username)))
-               . (($revision->log != '') ? '<p class="revision-log">' . filter_xss($revision->log) . '</p>' : '');
-      if ($revert_permission) {
-        $links['revert'] = array(
-          'title' => t('Revert'),
-          'href' => "node/" . $node->id() . "/revisions/" . $revision->vid . "/revert",
-        );
-      }
-      if ($delete_permission) {
-        $links['delete'] = array(
-          'title' => t('Delete'),
-          'href' => "node/" . $node->id() . "/revisions/" . $revision->vid . "/delete",
-        );
-      }
-      $row[] = array(
-        'data' => array(
-          '#type' => 'operations',
-          '#links' => $links,
-        ),
-      );
-    }
-    $rows[] = $row;
-  }
-
-  $build['node_revisions_table'] = array(
-    '#type' => 'table',
-    '#rows' => $rows,
-    '#header' => $header,
-    '#attached' => array (
-      'css' => array(drupal_get_path('module', 'node') . '/css/node.admin.css'),
-    ),
-  );
-
-  return $build;
 }

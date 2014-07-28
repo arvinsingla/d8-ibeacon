@@ -20,6 +20,7 @@ use Drupal\Core\TypedData\ComplexDataInterface;
  *
  * @see \Drupal\Core\Field\FieldItemListInterface
  * @see \Drupal\Core\Field\FieldItemBase
+ * @ingroup field_types
  */
 interface FieldItemInterface extends ComplexDataInterface {
 
@@ -32,7 +33,7 @@ interface FieldItemInterface extends ComplexDataInterface {
    *
    * @see \Drupal\Core\Field\FieldDefinition
    */
-  public static function propertyDefinitions(FieldDefinitionInterface $field_definition);
+  public static function propertyDefinitions(FieldStorageDefinitionInterface $field_definition);
 
   /**
    * Returns the name of the main property, if any.
@@ -57,7 +58,7 @@ interface FieldItemInterface extends ComplexDataInterface {
    *
    * Computed fields having no schema should return an empty array.
    *
-   * @param \Drupal\Core\Field\FieldDefinitionInterface $field_definition
+   * @param \Drupal\Core\Field\FieldStorageDefinitionInterface $field_definition
    *   The field definition.
    *
    * @return array
@@ -69,6 +70,8 @@ interface FieldItemInterface extends ComplexDataInterface {
    *     definitions depend on field settings when possible. No assumptions
    *     should be made on how storage engines internally use the original
    *     column name to structure their storage.
+   *   - unique keys: (optional) An array of Schema API unique key definitions.
+   *     Only columns that appear in the 'columns' array are allowed.
    *   - indexes: (optional) An array of Schema API index definitions. Only
    *     columns that appear in the 'columns' array are allowed. Those indexes
    *     will be used as default indexes. Callers of field_create_field() can
@@ -81,7 +84,7 @@ interface FieldItemInterface extends ComplexDataInterface {
    *     specify another field as related, only existing SQL tables,
    *     such as {taxonomy_term_data}.
    */
-  public static function schema(FieldDefinitionInterface $field_definition);
+  public static function schema(FieldStorageDefinitionInterface $field_definition);
 
   /**
    * Gets the entity that field belongs to.
@@ -174,24 +177,24 @@ interface FieldItemInterface extends ComplexDataInterface {
   /**
    * Defines custom presave behavior for field values.
    *
-   * This method is called before either insert() or update() methods, and
-   * before values are written into storage.
+   * This method is called before insert() and update() methods, and before
+   * values are written into storage.
    */
   public function preSave();
 
   /**
    * Defines custom insert behavior for field values.
    *
-   * This method is called after the save() method, and before values are
-   * written into storage.
+   * This method is called during the process of inserting an entity, just
+   * before values are written into storage.
    */
   public function insert();
 
   /**
    * Defines custom update behavior for field values.
    *
-   * This method is called after the save() method, and before values are
-   * written into storage.
+   * This method is called during the process of updating an entity, just before
+   * values are written into storage.
    */
   public function update();
 
@@ -211,6 +214,22 @@ interface FieldItemInterface extends ComplexDataInterface {
    * called for entity types that support revisioning.
    */
   public function deleteRevision();
+
+  /**
+   * Defines the field-level settings for this plugin.
+   *
+   * @return array
+   *   A list of default settings, keyed by the setting name.
+   */
+  public static function defaultSettings();
+
+  /**
+   * Defines the instance-level settings for this plugin.
+   *
+   * @return array
+   *   A list of default settings, keyed by the setting name.
+   */
+  public static function defaultInstanceSettings();
 
   /**
    * Returns a form for the field-level settings.
@@ -234,7 +253,7 @@ interface FieldItemInterface extends ComplexDataInterface {
    * @return
    *   The form definition for the field settings.
    */
-  public function settingsForm(array $form, array &$form_state, $has_data);
+  public function settingsForm(array &$form, array &$form_state, $has_data);
 
   /**
    * Returns a form for the instance-level settings.

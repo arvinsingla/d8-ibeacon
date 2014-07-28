@@ -9,7 +9,7 @@ namespace Drupal\Tests\Core\Entity;
 
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\Field\FieldDefinition;
-use Drupal\Core\Field\FieldDefinitionInterface;
+use Drupal\Core\Field\FieldStorageDefinitionInterface;
 use Drupal\Tests\UnitTestCase;
 
 /**
@@ -149,12 +149,14 @@ class FieldDefinitionTest extends UnitTestCase {
    */
   public function testFieldDefaultValue() {
     $definition = FieldDefinition::create($this->fieldType);
-    $setting = 'default_value';
     $value = $this->randomName();
-    $definition->setSetting($setting, $value);
-    $entity = $this->getMockBuilder('Drupal\Core\Entity\Entity')
+    $definition->setDefaultValue($value);
+    $entity = $this->getMockBuilder('Drupal\Core\Entity\ContentEntityBase')
       ->disableOriginalConstructor()
       ->getMock();
+    // Set the field item list class to be used to avoid requiring the typed
+    // data manager to retrieve it.
+    $definition->setClass('Drupal\Core\Field\FieldItemList');
     $this->assertEquals($value, $definition->getDefaultValue($entity));
   }
 
@@ -171,6 +173,18 @@ class FieldDefinitionTest extends UnitTestCase {
   }
 
   /**
+   * Tests field revisionable methods.
+   */
+  public function testFieldRevisionable() {
+    $definition = FieldDefinition::create($this->fieldType);
+    $this->assertFalse($definition->isRevisionable());
+    $definition->setRevisionable(TRUE);
+    $this->assertTrue($definition->isRevisionable());
+    $definition->setRevisionable(FALSE);
+    $this->assertFalse($definition->isRevisionable());
+  }
+
+  /**
    * Tests field cardinality.
    */
   public function testFieldCardinality() {
@@ -178,8 +192,8 @@ class FieldDefinitionTest extends UnitTestCase {
     $this->assertEquals(1, $definition->getCardinality());
     $definition->setCardinality(2);
     $this->assertEquals(2, $definition->getCardinality());
-    $definition->setCardinality(FieldDefinitionInterface::CARDINALITY_UNLIMITED);
-    $this->assertEquals(FieldDefinitionInterface::CARDINALITY_UNLIMITED, $definition->getCardinality());
+    $definition->setCardinality(FieldStorageDefinitionInterface::CARDINALITY_UNLIMITED);
+    $this->assertEquals(FieldStorageDefinitionInterface::CARDINALITY_UNLIMITED, $definition->getCardinality());
   }
 
   /**
@@ -195,11 +209,25 @@ class FieldDefinitionTest extends UnitTestCase {
   }
 
   /**
-   * Tests configurable.
+   * Tests provider.
    */
-  public function testFieldConfigurable() {
+  public function testFieldProvider() {
     $definition = FieldDefinition::create($this->fieldType);
-    $this->assertFalse($definition->isConfigurable());
+    $provider = $this->randomName();
+    $definition->setProvider($provider);
+    $this->assertEquals($provider, $definition->getProvider());
+  }
+
+  /**
+   * Tests custom storage.
+   */
+  public function testCustomStorage() {
+    $definition = FieldDefinition::create($this->fieldType);
+    $this->assertFalse($definition->hasCustomStorage());
+    $definition->setCustomStorage(TRUE);
+    $this->assertTrue($definition->hasCustomStorage());
+    $definition->setCustomStorage(FALSE);
+    $this->assertFalse($definition->hasCustomStorage());
   }
 
 }

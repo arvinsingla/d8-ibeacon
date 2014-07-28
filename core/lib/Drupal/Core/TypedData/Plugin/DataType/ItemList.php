@@ -20,6 +20,8 @@ use Drupal\Core\TypedData\TypedDataInterface;
  * Drupal\Core\TypedData\Annotation\DataType.
  * Note: The class cannot be called "List" as list is a reserved PHP keyword.
  *
+ * @ingroup typed_data
+ *
  * @DataType(
  *   id = "list",
  *   label = @Translation("List of items"),
@@ -56,7 +58,7 @@ class ItemList extends TypedData implements \IteratorAggregate, ListInterface {
    */
   public function setValue($values, $notify = TRUE) {
     if (!isset($values) || $values === array()) {
-      $this->list = $values;
+      $this->list = array();
     }
     else {
       if (!is_array($values)) {

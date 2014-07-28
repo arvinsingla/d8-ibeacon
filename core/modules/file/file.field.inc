@@ -6,54 +6,41 @@
  */
 
 use Drupal\Component\Utility\Html;
-use Drupal\field\FieldConfigInterface;
-
-/**
- * Implements hook_field_info_alter().
- *
- * Cannot annotate in FieldItem plugin the settings.uri_scheme meta data key
- * with a dynamic value. We need to alter the value here.
- */
-function file_field_info_alter(&$info) {
-  $info['file']['settings']['uri_scheme'] = file_default_scheme();
-}
+use Drupal\Component\Utility\String;
+use Drupal\Core\Field\FieldDefinitionInterface;
+use Drupal\Core\Render\Element;
 
 /**
  * Returns HTML for an individual file upload widget.
  *
- * @param $variables
- *   An associative array containing:
- *   - element: A render element representing the widget.
+ * Default template: file-widget.html.twig.
  *
- * @ingroup themeable
+ * @param array $variables
+ *   An associative array containing:
+ *   - element: A render element representing the file.
  */
-function theme_file_widget($variables) {
+function template_preprocess_file_widget(&$variables) {
   $element = $variables['element'];
-  $output = '';
-
-  // The "form-managed-file" class is required for proper Ajax functionality.
-  $output .= '<div class="file-widget form-managed-file clearfix">';
   if (!empty($element['fids']['#value'])) {
     // Add the file size after the file name.
     $file = reset($element['#files']);
     $element['file_' . $file->id()]['filename']['#suffix'] = ' <span class="file-size">(' . format_size($file->getSize()) . ')</span> ';
   }
-  $output .= drupal_render_children($element);
-  $output .= '</div>';
-
-  return $output;
+  $variables['element'] = $element;
+  // The "form-managed-file" class is required for proper Ajax functionality.
+  $variables['attributes'] = array('class' => array('file-widget', 'form-managed-file', 'clearfix'));
 }
 
 /**
- * Returns HTML for a group of file upload widgets.
+ * Prepares variables for multi file form widget templates.
  *
- * @param $variables
+ * Default template: file-widget-multiple.html.twig.
+ *
+ * @param array $variables
  *   An associative array containing:
  *   - element: A render element representing the widgets.
- *
- * @ingroup themeable
  */
-function theme_file_widget_multiple($variables) {
+function template_preprocess_file_widget_multiple(&$variables) {
   $element = $variables['element'];
 
   // Special ID and classes for draggable tables.
@@ -75,7 +62,7 @@ function theme_file_widget_multiple($variables) {
   // Get our list of widgets in order (needed when the form comes back after
   // preview or failed validation).
   $widgets = array();
-  foreach (element_children($element) as $key) {
+  foreach (Element::children($element) as $key) {
     $widgets[] = &$element[$key];
   }
   usort($widgets, '_field_sort_items_value_helper');
@@ -92,7 +79,7 @@ function theme_file_widget_multiple($variables) {
     // Delay rendering of the buttons, so that they can be rendered later in the
     // "operations" column.
     $operations_elements = array();
-    foreach (element_children($widget) as $sub_key) {
+    foreach (Element::children($widget) as $sub_key) {
       if (isset($widget[$sub_key]['#type']) && $widget[$sub_key]['#type'] == 'submit') {
         hide($widget[$sub_key]);
         $operations_elements[] = &$widget[$sub_key];
@@ -141,7 +128,7 @@ function theme_file_widget_multiple($variables) {
     );
   }
 
-  $build = array(
+  $variables['table'] = array(
     '#type' => 'table',
     '#header' => $headers,
     '#rows' => $rows,
@@ -157,25 +144,22 @@ function theme_file_widget_multiple($variables) {
     ),
   );
 
-  $output = empty($rows) ? '' : drupal_render($build);
-  $output .= drupal_render_children($element);
-  return $output;
+  $variables['element'] = $element;
 }
 
-
 /**
- * Returns HTML for help text based on file upload validators.
+ * Prepares variables for file upload help text templates.
  *
- * @param $variables
+ * Default template: file-upload-help.html.twig.
+ *
+ * @param array $variables
  *   An associative array containing:
  *   - description: The normal description for this field, specified by the
  *     user.
  *   - upload_validators: An array of upload validators as used in
  *     $element['#upload_validators'].
- *
- * @ingroup themeable
  */
-function theme_file_upload_help($variables) {
+function template_preprocess_file_upload_help(&$variables) {
   $description = $variables['description'];
   $upload_validators = $variables['upload_validators'];
   $cardinality = $variables['cardinality'];
@@ -197,7 +181,7 @@ function theme_file_upload_help($variables) {
     $descriptions[] = t('!size limit.', array('!size' => format_size($upload_validators['file_validate_size'][0])));
   }
   if (isset($upload_validators['file_validate_extensions'])) {
-    $descriptions[] = t('Allowed types: !extensions.', array('!extensions' => check_plain($upload_validators['file_validate_extensions'][0])));
+    $descriptions[] = t('Allowed types: !extensions.', array('!extensions' => String::checkPlain($upload_validators['file_validate_extensions'][0])));
   }
 
   if (isset($upload_validators['file_validate_image_resolution'])) {
@@ -207,31 +191,31 @@ function theme_file_upload_help($variables) {
       $descriptions[] = t('Images must be exactly !size pixels.', array('!size' => '<strong>' . $max . '</strong>'));
     }
     elseif ($min && $max) {
-      $descriptions[] = t('Images must be between !min and !max pixels.', array('!min' => '<strong>' . $min . '</strong>', '!max' => '<strong>' . $max . '</strong>'));
+      $descriptions[] = t('Images must be larger than !min pixels. Images larger than !max pixels will be resized.', array('!min' => '<strong>' . $min . '</strong>', '!max' => '<strong>' . $max . '</strong>'));
     }
     elseif ($min) {
       $descriptions[] = t('Images must be larger than !min pixels.', array('!min' => '<strong>' . $min . '</strong>'));
     }
     elseif ($max) {
-      $descriptions[] = t('Images must be smaller than !max pixels.', array('!max' => '<strong>' . $max . '</strong>'));
+      $descriptions[] = t('Images larger than !max pixels will be resized.', array('!max' => '<strong>' . $max . '</strong>'));
     }
   }
 
-  return implode(' ', $descriptions);
+  $variables['descriptions'] = $descriptions;
 }
 
 /**
  * Determine whether a field references files stored in {file_managed}.
  *
- * @param Drupal\field\FieldConfigInterface $field
+ * @param \Drupal\Core\Field\FieldDefinitionInterface $field
  *   A field definition.
  *
- * @return
+ * @return bool
  *   The field column if the field references {file_managed}.fid, typically
- *   fid, FALSE if it doesn't.
+ *   fid, FALSE if it does not.
  */
-function file_field_find_file_reference_column(FieldConfigInterface $field) {
-  $schema = $field->getSchema();
+function file_field_find_file_reference_column(FieldDefinitionInterface $field) {
+  $schema = $field->getFieldStorageDefinition()->getSchema();
   foreach ($schema['foreign keys'] as $data) {
     if ($data['table'] == 'file_managed') {
       foreach ($data['columns'] as $field_column => $column) {
@@ -242,39 +226,4 @@ function file_field_find_file_reference_column(FieldConfigInterface $field) {
     }
   }
   return FALSE;
-}
-
-/**
- * Returns HTML for a file attachments table.
- *
- * @param $variables
- *   An associative array containing:
- *   - items: field values, as a FileFieldItemList object.
- *
- * @ingroup themeable
- */
-function theme_file_formatter_table($variables) {
-  $header = array(t('Attachment'), t('Size'));
-  $rows = array();
-  foreach ($variables['items'] as $delta => $item) {
-    if ($item->isDisplayed() && $item->entity) {
-      $rows[] = array(
-        array(
-          'data' => array(
-            '#theme' => 'file_link',
-            '#file' => $item->entity,
-          ),
-        ),
-        format_size($item->entity->getSize()),
-      );
-    }
-  }
-
-  $build = array(
-    '#type' => 'table',
-    '#header' => $header,
-    '#rows' => $rows,
-  );
-
-  return empty($rows) ? '' : drupal_render($build);
 }

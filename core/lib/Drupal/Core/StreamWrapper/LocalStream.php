@@ -94,49 +94,6 @@ abstract class LocalStream implements StreamWrapperInterface {
   }
 
   /**
-   * Implements Drupal\Core\StreamWrapper\StreamWrapperInterface::getMimeType().
-   */
-  static function getMimeType($uri, $mapping = NULL) {
-    if (!isset($mapping)) {
-      // The default file map, defined in file.mimetypes.inc is quite big.
-      // We only load it when necessary.
-      include_once DRUPAL_ROOT . '/core/includes/file.mimetypes.inc';
-      $mapping = file_mimetype_mapping();
-    }
-
-    $extension = '';
-    $file_parts = explode('.', drupal_basename($uri));
-
-    // Remove the first part: a full filename should not match an extension.
-    array_shift($file_parts);
-
-    // Iterate over the file parts, trying to find a match.
-    // For my.awesome.image.jpeg, we try:
-    //   - jpeg
-    //   - image.jpeg, and
-    //   - awesome.image.jpeg
-    while ($additional_part = array_pop($file_parts)) {
-      $extension = strtolower($additional_part . ($extension ? '.' . $extension : ''));
-      if (isset($mapping['extensions'][$extension])) {
-        return $mapping['mimetypes'][$mapping['extensions'][$extension]];
-      }
-    }
-
-    return 'application/octet-stream';
-  }
-
-  /**
-   * Implements Drupal\Core\StreamWrapper\StreamWrapperInterface::chmod().
-   */
-  function chmod($mode) {
-    $output = @chmod($this->getLocalPath(), $mode);
-    // We are modifying the underlying file here, so we have to clear the stat
-    // cache so that PHP understands that URI has changed too.
-    clearstatcache(TRUE, $this->getLocalPath());
-    return $output;
-  }
-
-  /**
    * Implements Drupal\Core\StreamWrapper\StreamWrapperInterface::realpath().
    */
   function realpath() {
@@ -352,6 +309,34 @@ abstract class LocalStream implements StreamWrapperInterface {
    */
   public function stream_cast($cast_as) {
     return false;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function stream_metadata($uri, $option, $value) {
+    $target = $this->getLocalPath($uri);
+    $return = FALSE;
+    switch ($option) {
+      case STREAM_META_TOUCH:
+        if (!empty($value)) {
+          $return = touch($target, $value[0], $value[1]);
+        }
+        else {
+          $return = touch($target);
+        }
+        break;
+
+      case STREAM_META_ACCESS:
+        $return = chmod($target, $value);
+        break;
+    }
+    if ($return) {
+      // For convenience clear the file status cache of the underlying file,
+      // since metadata operations are often followed by file status checks.
+      clearstatcache(TRUE, $target);
+    }
+    return $return;
   }
 
   /**

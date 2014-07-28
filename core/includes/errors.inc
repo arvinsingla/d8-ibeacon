@@ -5,6 +5,8 @@
  * Functions for error handling.
  */
 
+use Drupal\Component\Utility\Xss;
+use Drupal\Core\Page\DefaultHtmlPageRenderer;
 use Drupal\Core\Utility\Error;
 use Drupal\Component\Utility\String;
 use Symfony\Component\HttpFoundation\Response;
@@ -61,16 +63,12 @@ function _drupal_error_handler_real($error_level, $message, $filename, $line, $c
     $backtrace = debug_backtrace();
     $caller = Error::getLastCaller($backtrace);
 
-    if (!function_exists('filter_xss_admin')) {
-      require_once __DIR__ . '/common.inc';
-    }
-
     // We treat recoverable errors as fatal.
     _drupal_log_error(array(
       '%type' => isset($types[$error_level]) ? $severity_msg : 'Unknown error',
       // The standard PHP error handler considers that the error messages
       // are HTML. We mimick this behavior here.
-      '!message' => filter_xss_admin($message),
+      '!message' => Xss::filterAdmin($message),
       '%function' => $caller['function'],
       '%file' => $caller['file'],
       '%line' => $caller['line'],
@@ -122,7 +120,7 @@ function _drupal_log_error($error, $fatal = FALSE) {
   $is_installer = drupal_installation_attempted();
   // Initialize a maintenance theme if the bootstrap was not complete.
   // Do it early because drupal_set_message() triggers a drupal_theme_initialize().
-  if ($fatal && (drupal_get_bootstrap_phase() != DRUPAL_BOOTSTRAP_FULL)) {
+  if ($fatal && drupal_get_bootstrap_phase() < DRUPAL_BOOTSTRAP_CODE) {
     // The installer initializes a maintenance theme at the earliest possible
     // point in time already. Do not unset that.
     if (!$is_installer) {
@@ -158,7 +156,7 @@ function _drupal_log_error($error, $fatal = FALSE) {
     $number++;
   }
 
-  watchdog('php', '%type: !message in %function (line %line of %file).', $error, $error['severity_level']);
+  \Drupal::logger('php')->log($error['severity_level'], '%type: !message in %function (line %line of %file).', $error);
 
   if (drupal_is_cli()) {
     if ($fatal) {
@@ -231,12 +229,7 @@ function _drupal_log_error($error, $fatal = FALSE) {
         install_display_output($output, $GLOBALS['install_state']);
       }
       else {
-        $output = array(
-          '#theme' => 'maintenance_page',
-          '#title' => 'Error',
-          '#content' => $message,
-        );
-        $output = drupal_render($output);
+        $output = DefaultHtmlPageRenderer::renderPage($message, 'Error');
       }
 
       $response = new Response($output, 500);
@@ -251,9 +244,9 @@ function _drupal_log_error($error, $fatal = FALSE) {
 /**
  * Returns the current error level.
  *
- * This function should only be used to get the current error level pre
- * DRUPAL_BOOTSTRAP_KERNEL or before Drupal is installed. In all other
- * situations the following code is preferred:
+ * This function should only be used to get the current error level prior to
+ * DRUPAL_BOOTSTRAP_KERNEL or before Drupal is installed. In all other situations
+ * the following code is preferred:
  * @code
  * \Drupal::config('system.logging')->get('error_level');
  * @endcode

@@ -8,7 +8,7 @@ namespace Drupal\Component\Plugin\Factory;
 
 use Drupal\Component\Plugin\Discovery\DiscoveryInterface;
 use Drupal\Component\Plugin\Exception\PluginException;
-use Drupal\Component\Plugin\Derivative\DerivativeInterface;
+use Drupal\Component\Plugin\Derivative\DeriverInterface;
 
 /**
  * Default plugin factory.
@@ -51,13 +51,15 @@ class DefaultFactory implements FactoryInterface {
    *
    * @param string $plugin_id
    *   The id of a plugin.
-   * @param array $plugin_definition
-   *   The plugin definition associated to the plugin_id.
+   * @param mixed $plugin_definition
+   *   The plugin definition associated with the plugin ID.
    *
    * @return string
    *   The appropriate class name.
+   *
+   * @throws \Drupal\Component\Plugin\Exception\PluginException
    */
-  public static function getPluginClass($plugin_id, array $plugin_definition = NULL) {
+  public static function getPluginClass($plugin_id, $plugin_definition = NULL) {
     if (empty($plugin_definition['class'])) {
       throw new PluginException(sprintf('The plugin (%s) did not specify an instance class.', $plugin_id));
     }

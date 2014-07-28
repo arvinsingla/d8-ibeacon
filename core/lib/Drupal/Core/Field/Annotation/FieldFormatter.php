@@ -22,6 +22,8 @@ use Drupal\Component\Annotation\Plugin;
  *
  * @see \Drupal\Core\Field\FormatterPluginManager
  * @see \Drupal\Core\Field\FormatterInterface
+ *
+ * @ingroup field_formatter
  */
 class FieldFormatter extends Plugin {
 
@@ -65,14 +67,6 @@ class FieldFormatter extends Plugin {
    * @var array
    */
   public $field_types = array();
-
-  /**
-   * An array whose keys are the names of the settings available to the
-   * formatter type, and whose values are the default values for those settings.
-   *
-   * @var array
-   */
-  public $settings = array();
 
   /**
    * An integer to determine the weight of this formatter relative to other

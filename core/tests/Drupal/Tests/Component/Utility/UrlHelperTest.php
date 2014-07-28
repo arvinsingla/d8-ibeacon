@@ -2,7 +2,7 @@
 
 /**
  * @file
- * Contains \Drupal\Tests\Component\Utility\UrlTest.
+ * Contains \Drupal\Tests\Component\Utility\UrlHelperTest.
  */
 
 namespace Drupal\Tests\Component\Utility;
@@ -17,13 +17,13 @@ use Drupal\Tests\UnitTestCase;
  *
  * @see \Drupal\Component\Utility\Url
  */
-class UrlTest extends UnitTestCase {
+class UrlHelperTest extends UnitTestCase {
 
   public static function getInfo() {
     return array(
-      'name' => t('UrlHelper Tests'),
-      'description' => t('Tests the UrlHelper utility class.'),
-      'group' => t('Path API'),
+      'name' => 'UrlHelper Tests',
+      'description' => 'Tests the UrlHelper utility class.',
+      'group' => 'Path API',
     );
   }
 

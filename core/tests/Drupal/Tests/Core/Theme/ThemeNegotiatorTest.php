@@ -7,9 +7,12 @@
 
 namespace Drupal\Tests\Core\Theme;
 
+use Drupal\Core\Routing\RouteMatch;
 use Drupal\Core\Theme\ThemeNegotiator;
 use Drupal\Tests\UnitTestCase;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\Routing\Route;
 
 /**
  * Tests the theme negotiator.
@@ -26,6 +29,13 @@ class ThemeNegotiatorTest extends UnitTestCase {
    * @var \Drupal\Core\Theme\ThemeAccessCheck|\PHPUnit_Framework_MockObject_MockObject
    */
   protected $themeAccessCheck;
+
+  /**
+   * The request stack.
+   *
+   * @var \Symfony\Component\HttpFoundation\RequestStack
+   */
+  protected $requestStack;
 
   /**
    * The actual tested theme negotiator.
@@ -69,11 +79,10 @@ class ThemeNegotiatorTest extends UnitTestCase {
       ->method('checkAccess')
       ->will($this->returnValue(TRUE));
 
-    $request = Request::create('/test-route');
-    $theme = $this->themeNegotiator->determineActiveTheme($request);
+    $route_match = new RouteMatch('test_route', new Route('/test-route'), array(), array());
+    $theme = $this->themeNegotiator->determineActiveTheme($route_match);
 
     $this->assertEquals('example_test', $theme);
-    $this->assertEquals('example_test', $request->attributes->get('_theme_active'));
   }
 
   /**
@@ -104,11 +113,10 @@ class ThemeNegotiatorTest extends UnitTestCase {
       ->method('checkAccess')
       ->will($this->returnValue(TRUE));
 
-    $request = Request::create('/test-route');
-    $theme = $this->themeNegotiator->determineActiveTheme($request);
+    $route_match = new RouteMatch('test_route', new Route('/test-route'), array(), array());
+    $theme = $this->themeNegotiator->determineActiveTheme($route_match);
 
     $this->assertEquals('example_test', $theme);
-    $this->assertEquals('example_test', $request->attributes->get('_theme_active'));
   }
 
   /**
@@ -147,11 +155,10 @@ class ThemeNegotiatorTest extends UnitTestCase {
       ->with('example_test2')
       ->will($this->returnValue(TRUE));
 
-    $request = Request::create('/test-route');
-    $theme = $this->themeNegotiator->determineActiveTheme($request);
+    $route_match = new RouteMatch('test_route', new Route('/test-route'), array(), array());
+    $theme = $this->themeNegotiator->determineActiveTheme($route_match);
 
     $this->assertEquals('example_test2', $theme);
-    $this->assertEquals('example_test2', $request->attributes->get('_theme_active'));
   }
 
   /**
@@ -183,11 +190,10 @@ class ThemeNegotiatorTest extends UnitTestCase {
       ->method('checkAccess')
       ->will($this->returnValue(TRUE));
 
-    $request = Request::create('/test-route');
-    $theme = $this->themeNegotiator->determineActiveTheme($request);
+    $route_match = new RouteMatch('test_route', new Route('/test-route'), array(), array());
+    $theme = $this->themeNegotiator->determineActiveTheme($route_match);
 
     $this->assertEquals('example_test2', $theme);
-    $this->assertEquals('example_test2', $request->attributes->get('_theme_active'));
   }
 
 }

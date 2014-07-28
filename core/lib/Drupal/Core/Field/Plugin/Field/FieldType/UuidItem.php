@@ -7,6 +7,8 @@
 
 namespace Drupal\Core\Field\Plugin\Field\FieldType;
 
+use Drupal\Core\Field\FieldStorageDefinitionInterface;
+
 /**
  * Defines the 'uuid' entity field type.
  *
@@ -16,13 +18,19 @@ namespace Drupal\Core\Field\Plugin\Field\FieldType;
  *   id = "uuid",
  *   label = @Translation("UUID"),
  *   description = @Translation("An entity field containing a UUID."),
- *   settings = {
- *     "max_length" = "128"
- *   },
- *   configurable = FALSE
+ *   no_ui = TRUE
  * )
  */
 class UuidItem extends StringItem {
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function defaultSettings() {
+    return array(
+      'max_length' => 128,
+    ) + parent::defaultSettings();
+  }
 
   /**
    * {@inheritdoc}
@@ -33,4 +41,14 @@ class UuidItem extends StringItem {
     $this->setValue(array('value' => $uuid->generate()), $notify);
     return $this;
   }
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function schema(FieldStorageDefinitionInterface $field_definition) {
+    $schema = parent::schema($field_definition);
+    $schema['unique keys']['value'] = array('value');
+    return $schema;
+  }
+
 }

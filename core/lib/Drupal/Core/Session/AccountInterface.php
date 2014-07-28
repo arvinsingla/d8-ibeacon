@@ -12,6 +12,8 @@ namespace Drupal\Core\Session;
  *
  * Defines an object that has a user id, roles and can have session data. The
  * interface is implemented both by the global session and the user entity.
+ *
+ * @ingroup user_api
  */
 interface AccountInterface {
 
@@ -26,10 +28,13 @@ interface AccountInterface {
   /**
    * Returns a list of roles.
    *
+   * @param bool $exclude_locked_roles
+   *   (optional) If TRUE, locked roles (anonymous/authenticated) are not returned.
+   *
    * @return array
    *   List of role IDs.
    */
-  public function getRoles();
+  public function getRoles($exclude_locked_roles = FALSE);
 
   /**
    * Checks whether a user has a certain permission.
@@ -127,10 +132,10 @@ interface AccountInterface {
   public function getUsername();
 
   /**
-   * Returns the e-mail address of this account.
+   * Returns the email address of this account.
    *
    * @return string
-   *   The e-mail address.
+   *   The email address.
    */
   public function getEmail();
 
@@ -151,5 +156,12 @@ interface AccountInterface {
    *   Timestamp of the last access.
    */
   public function getLastAccessedTime();
+
+  /**
+   * Returns the session hostname.
+   *
+   * @return string
+   */
+  public function getHostname();
 
 }

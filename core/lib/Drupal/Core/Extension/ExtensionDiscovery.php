@@ -7,8 +7,8 @@
 
 namespace Drupal\Core\Extension;
 
-use Drupal\Component\Utility\Settings;
 use Drupal\Core\Extension\Discovery\RecursiveExtensionFilterIterator;
+use Drupal\Core\Site\Settings;
 
 /**
  * Discovers available extensions in the filesystem.
@@ -131,7 +131,7 @@ class ExtensionDiscovery {
     // Therefore, add the site directory of the parent site to the search paths,
     // so that contained extensions are still discovered.
     // @see \Drupal\simpletest\WebTestBase::setUp()
-    if ($parent_site = Settings::getSingleton()->get('test_parent_site')) {
+    if ($parent_site = Settings::get('test_parent_site')) {
       $searchdirs[static::ORIGIN_PARENT_SITE] = $parent_site;
     }
 
@@ -140,8 +140,10 @@ class ExtensionDiscovery {
 
     // Unless an explicit value has been passed, manually check whether we are
     // in a test environment, in which case test extensions must be included.
+    // Test extensions can also be included for debugging purposes by setting a
+    // variable in settings.php.
     if (!isset($include_tests)) {
-      $include_tests = (bool) drupal_valid_test_ua();
+      $include_tests = drupal_valid_test_ua() || Settings::get('extension_discovery_scan_tests');
     }
 
     $files = array();
@@ -165,7 +167,7 @@ class ExtensionDiscovery {
     foreach ($files as $key => $file) {
       // If the extension does not belong to a profile, just apply the weight
       // of the originating directory.
-      if (strpos($file->getSubPath(), 'profiles') !== 0) {
+      if (strpos($file->subpath, 'profiles') !== 0) {
         $origins[$key] = $origin_weights[$file->origin];
         $profiles[$key] = NULL;
       }
@@ -273,18 +275,7 @@ class ExtensionDiscovery {
     $files = array();
     // Duplicate files found in later search directories take precedence over
     // earlier ones; they replace the extension in the existing $files array.
-    // The exception to this is if the later extension is not compatible with
-    // the current version of Drupal core, which may occur during upgrades when
-    // e.g. new modules were introduced in core while older contrib modules with
-    // the same name still exist in a later search path.
     foreach ($all_files as $file) {
-      if (isset($files[$file->getName()])) {
-        // Skip the extension if it is incompatible with Drupal core.
-        $info = $this->getInfoParser()->parse($file->getPathname());
-        if (!isset($info['core']) || $info['core'] != \Drupal::CORE_COMPATIBILITY) {
-          continue;
-        }
-      }
       $files[$file->getName()] = $file;
     }
     return $files;
@@ -380,10 +371,9 @@ class ExtensionDiscovery {
       }
 
       $extension = new Extension($type, $pathname, $filename);
-      // Inject the existing RecursiveDirectoryIterator object to avoid
-      // unnecessary creation of additional SplFileInfo resources.
-      $extension->setSplFileInfo($fileinfo);
+
       // Track the originating directory for sorting purposes.
+      $extension->subpath = $fileinfo->getSubPath();
       $extension->origin = $dir;
 
       $files[$type][$key] = $extension;

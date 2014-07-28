@@ -6,8 +6,10 @@
  */
 
 use Drupal\Component\Utility\Crypt;
+use Drupal\Component\Utility\Environment;
 use Drupal\Core\Database\Database;
 use Drupal\Core\Language\Language;
+use Drupal\Core\Site\Settings;
 use Drupal\Core\StreamWrapper\PublicStream;
 
 /**
@@ -182,7 +184,7 @@ function system_requirements($phase) {
     'value' => $memory_limit == -1 ? t('-1 (Unlimited)') : $memory_limit,
   );
 
-  if (!drupal_check_memory_limit(DRUPAL_MINIMUM_PHP_MEMORY_LIMIT, $memory_limit)) {
+  if (!Environment::checkMemoryLimit(DRUPAL_MINIMUM_PHP_MEMORY_LIMIT, $memory_limit)) {
     $description = '';
     if ($phase == 'install') {
       $description = t('Consider increasing your PHP memory limit to %memory_minimum_limit to help prevent errors in the installation process.', array('%memory_minimum_limit' => DRUPAL_MINIMUM_PHP_MEMORY_LIMIT));
@@ -335,7 +337,7 @@ function system_requirements($phase) {
   // unless overrides are provided in settings.php.
   if ($phase == 'install') {
     $directories = array();
-    if ($file_public_path = settings()->get('file_public_path')) {
+    if ($file_public_path = Settings::get('file_public_path')) {
       $directories[] = $file_public_path;
     }
     else {
@@ -447,7 +449,7 @@ function system_requirements($phase) {
 
   // Verify the update.php access setting
   if ($phase == 'runtime') {
-    if (settings()->get('update_free_access')) {
+    if (Settings::get('update_free_access')) {
       $requirements['update access'] = array(
         'value' => t('Not protected'),
         'severity' => REQUIREMENT_ERROR,
@@ -530,7 +532,7 @@ function system_requirements($phase) {
     }
     $requirements['update status']['title'] = t('Update notifications');
 
-    if (settings()->get('rebuild_access')) {
+    if (Settings::get('rebuild_access')) {
       $requirements['rebuild access'] = array(
         'title' => t('Rebuild access'),
         'value' => t('Enabled'),
@@ -566,13 +568,6 @@ function system_requirements($phase) {
  * Implements hook_install().
  */
 function system_install() {
-  // Enable and set the default theme. Can't use theme_enable() this early in
-  // installation.
-  \Drupal::service('config.installer')->installDefaultConfig('theme', 'stark');
-  \Drupal::config('system.theme')
-    ->set('default', 'stark')
-    ->save();
-
   // Populate the cron key state variable.
   $cron_key = Crypt::randomBytesBase64(55);
   \Drupal::state()->set('system.cron_key', $cron_key);
@@ -796,13 +791,6 @@ function system_schema() {
         'not null' => TRUE,
         'default' => '',
       ),
-      'provider' => array(
-        'description' => 'The provider grouping to which a route belongs.',
-        'type' => 'varchar',
-        'length' => 255,
-        'not null' => TRUE,
-        'default' => '',
-      ),
       'fit' => array(
         'description' => 'A numeric representation of how specific the path is.',
         'type' => 'int',
@@ -811,7 +799,8 @@ function system_schema() {
       ),
       'route' => array(
         'description' => 'A serialized Route object',
-        'type' => 'text',
+        'type' => 'blob',
+        'size' => 'big',
       ),
       'number_parts' => array(
         'description' => 'Number of parts in this router path.',
@@ -823,7 +812,6 @@ function system_schema() {
     ),
     'indexes' => array(
       'pattern_outline_fit' => array('pattern_outline', 'fit'),
-      'provider' => array('provider'),
     ),
     'primary key' => array('name'),
   );
@@ -967,26 +955,6 @@ function system_schema() {
       'alias_langcode_pid' => array('alias', 'langcode', 'pid'),
       'source_langcode_pid' => array('source', 'langcode', 'pid'),
     ),
-  );
-
-  $schema['config_snapshot'] = array(
-    'description' => 'Stores a snapshot of the last imported configuration.',
-    'fields' => array(
-      'name' => array(
-        'description' => 'The identifier for the config object (the name of the file, minus the file extension).',
-        'type' => 'varchar',
-        'length' => 255,
-        'not null' => TRUE,
-        'default' => '',
-      ),
-      'data' => array(
-        'description' => 'The raw data for this configuration object.',
-        'type' => 'blob',
-        'not null' => TRUE,
-        'size' => 'big',
-      ),
-    ),
-    'primary key' => array('name'),
   );
 
   return $schema;

@@ -5,7 +5,7 @@
  * Contains \Drupal\Tests\Core\Session\UserSessionTest.
  */
 
-namespace Drupal\Tests\Core\Session;
+namespace Drupal\Tests\Core\Session {
 
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\Session\UserSession;
@@ -14,7 +14,7 @@ use Drupal\Tests\UnitTestCase;
 /**
  * Tests the user session object.
  *
- * @see \Drupal\Core\Session\UserSession
+ * @coversDefaultClass \Drupal\Core\Session\UserSession
  */
 class UserSessionTest extends UnitTestCase {
 
@@ -91,7 +91,7 @@ class UserSessionTest extends UnitTestCase {
         array('last example permission', FALSE),
       )));
 
-    $role_storage = $this->getMockBuilder('Drupal\user\RoleStorageController')
+    $role_storage = $this->getMockBuilder('Drupal\user\RoleStorage')
       ->disableOriginalConstructor()
       ->setMethods(array('loadMultiple'))
       ->getMock();
@@ -107,7 +107,7 @@ class UserSessionTest extends UnitTestCase {
 
     $entity_manager = $this->getMock('Drupal\Core\Entity\EntityManagerInterface');
     $entity_manager->expects($this->any())
-      ->method('getStorageController')
+      ->method('getStorage')
       ->with($this->equalTo('user_role'))
       ->will($this->returnValue($role_storage));
     $container = new ContainerBuilder();
@@ -116,6 +116,7 @@ class UserSessionTest extends UnitTestCase {
 
     $this->users['user_one'] = $this->createUserSession(array('role_one'));
     $this->users['user_two'] = $this->createUserSession(array('role_one', 'role_two'));
+    $this->users['user_three'] = $this->createUserSession(array('role_two', 'authenticated'));
     $this->users['user_last'] = $this->createUserSession();
   }
 
@@ -140,6 +141,37 @@ class UserSessionTest extends UnitTestCase {
     foreach ($sessions_without_access as $name) {
       $this->assertFalse($this->users[$name]->hasPermission($permission));
     }
+  }
+
+  /**
+   * Tests the method getRoles exclude or include locked roles based in param.
+   *
+   * @covers ::getRoles
+   * @todo Move roles constants to a class/interface
+   */
+  public function testUserGetRoles() {
+    $this->assertEquals(array('role_two', DRUPAL_AUTHENTICATED_RID), $this->users['user_three']->getRoles());
+    $this->assertEquals(array('role_two'), $this->users['user_three']->getRoles(TRUE));
+  }
+
+}
+
+
+}
+
+namespace {
+
+  if (!defined('DRUPAL_ANONYMOUS_RID')) {
+    /**
+     * Stub Role ID for anonymous users since bootstrap.inc isn't available.
+     */
+    define('DRUPAL_ANONYMOUS_RID', 'anonymous');
+  }
+  if (!defined('DRUPAL_AUTHENTICATED_RID')) {
+    /**
+     * Stub Role ID for authenticated users since bootstrap.inc isn't available.
+     */
+    define('DRUPAL_AUTHENTICATED_RID', 'authenticated');
   }
 
 }

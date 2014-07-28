@@ -10,15 +10,20 @@
 
 use Drupal\Component\Utility\String;
 use Drupal\Component\Utility\UrlHelper;
+use Drupal\Component\Utility\Xss;
 use Drupal\Core\Config\Config;
-use Drupal\Core\Language\Language;
+use Drupal\Core\Config\StorageException;
 use Drupal\Core\Extension\Extension;
 use Drupal\Core\Extension\ExtensionNameLengthException;
+use Drupal\Core\Page\FeedLinkElement;
+use Drupal\Core\Page\LinkElement;
+use Drupal\Core\Page\MetaElement;
+use Drupal\Core\Routing\RouteMatch;
 use Drupal\Core\Template\Attribute;
-use Drupal\Core\Template\RenderWrapper;
 use Drupal\Core\Theme\ThemeSettings;
 use Drupal\Component\Utility\NestedArray;
 use Drupal\Core\Render\Element;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * @defgroup content_flags Content markers
@@ -86,8 +91,12 @@ function drupal_theme_access($theme) {
 
 /**
  * Initializes the theme system by loading the theme.
+ *
+ * @param RouteMatch $route_match
+ *   The route match to use for theme initialization.
+// @todo Force calling methods to provide as RouteMatch.
  */
-function drupal_theme_initialize() {
+function drupal_theme_initialize(RouteMatch $route_match = NULL) {
   global $theme, $theme_key;
 
   // If $theme is already set, assume the others are set, too, and do nothing
@@ -97,11 +106,26 @@ function drupal_theme_initialize() {
 
   $themes = list_themes();
 
-  // @todo Let the theme.negotiator listen to the kernel request event.
   // Determine the active theme for the theme negotiator service. This includes
   // the default theme as well as really specific ones like the ajax base theme.
-  $request = \Drupal::request();
-  $theme = \Drupal::service('theme.negotiator')->determineActiveTheme($request) ?: 'stark';
+  if (!$route_match) {
+    $route_match = \Drupal::routeMatch();
+  }
+  $theme = \Drupal::service('theme.negotiator')->determineActiveTheme($route_match);
+
+  // If no theme could be negotiated, or if the negotiated theme is not within
+  // the list of enabled themes, fall back to the default theme output of core
+  // and modules (similar to Stark, but without a theme extension at all). This
+  // is possible, because _drupal_theme_initialize() always loads the Twig theme
+  // engine.
+  if (!$theme || !isset($themes[$theme])) {
+    $theme = 'core';
+    $theme_key = $theme;
+    // /core/core.info.yml does not actually exist, but is required because
+    // Extension expects a pathname.
+    _drupal_theme_initialize(new Extension('theme', 'core/core.info.yml'));
+    return;
+  }
 
   // Store the identifier for retrieving theme settings with.
   $theme_key = $theme;
@@ -210,35 +234,31 @@ function _drupal_theme_initialize($theme, $base_theme = array()) {
   }
   drupal_render($css);
 
-  // Do basically the same as the above for scripts
-  $final_scripts = array();
+  // Do basically the same as the above for libraries
+  $final_libraries = array();
 
-  // Grab scripts from base theme
+  // Grab libraries from base theme
   foreach ($base_theme as $base) {
-    if (!empty($base->scripts)) {
-      foreach ($base->scripts as $name => $script) {
-        $final_scripts[$name] = $script;
+    if (!empty($base->libraries)) {
+      foreach ($base->libraries as $library) {
+        $final_libraries[] = $library;
       }
     }
   }
 
-  // Add scripts used by this theme.
-  if (!empty($theme->scripts)) {
-    foreach ($theme->scripts as $name => $script) {
-      $final_scripts[$name] = $script;
+  // Add libraries used by this theme.
+  if (!empty($theme->libraries)) {
+    foreach ($theme->libraries as $library) {
+      $final_libraries[] = $library;
     }
   }
 
-  // Add scripts used by this theme.
-  $js = array();
-  foreach ($final_scripts as $script) {
-    $js['#attached']['js'][] = array(
-      'data' => $script,
-      'group' => JS_THEME,
-      'every_page' => TRUE,
-    );
+  // Add libraries used by this theme.
+  $libraries = array();
+  foreach ($final_libraries as $library) {
+    $libraries['#attached']['library'][] = $library;
   }
-  drupal_render($js);
+  drupal_render($libraries);
 
   $theme_engine = NULL;
 
@@ -394,12 +414,17 @@ function list_themes($refresh = FALSE) {
  */
 function _theme($hook, $variables = array()) {
   static $default_attributes;
+
+  $module_handler = \Drupal::moduleHandler();
+
   // If called before all modules are loaded, we do not necessarily have a full
   // theme registry to work with, and therefore cannot process the theme
   // request properly. See also \Drupal\Core\Theme\Registry::get().
-  if (!\Drupal::moduleHandler()->isLoaded() && !defined('MAINTENANCE_MODE')) {
+  if (!$module_handler->isLoaded() && !defined('MAINTENANCE_MODE')) {
     throw new Exception(t('_theme() may not be called until all modules are loaded.'));
   }
+  // Ensure the theme is initialized.
+  drupal_theme_initialize();
 
   /** @var \Drupal\Core\Utility\ThemeRegistry $theme_registry */
   $theme_registry = \Drupal::service('theme.registry')->getRuntime();
@@ -433,7 +458,7 @@ function _theme($hook, $variables = array()) {
       // Only log a message when not trying theme suggestions ($hook being an
       // array).
       if (!isset($candidate)) {
-        watchdog('theme', 'Theme hook %hook not found.', array('%hook' => $hook), WATCHDOG_WARNING);
+        \Drupal::logger('theme')->warning('Theme hook %hook not found.', array('%hook' => $hook));
       }
       // There is no theme implementation for the hook passed. Return FALSE so
       // the function calling _theme() can differentiate between a hook that
@@ -492,7 +517,7 @@ function _theme($hook, $variables = array()) {
   }
 
   // Invoke hook_theme_suggestions_HOOK().
-  $suggestions = Drupal::moduleHandler()->invokeAll('theme_suggestions_' . $base_theme_hook, array($variables));
+  $suggestions = $module_handler->invokeAll('theme_suggestions_' . $base_theme_hook, array($variables));
   // If _theme() was invoked with a direct theme suggestion like
   // '#theme' => 'node__article', add it to the suggestions array before
   // invoking suggestion alter hooks.
@@ -506,7 +531,7 @@ function _theme($hook, $variables = array()) {
     'theme_suggestions',
     'theme_suggestions_' . $base_theme_hook,
   );
-  \Drupal::moduleHandler()->alter($hooks, $suggestions, $variables, $base_theme_hook);
+  $module_handler->alter($hooks, $suggestions, $variables, $base_theme_hook);
 
   // Check if each suggestion exists in the theme registry, and if so,
   // use it instead of the hook that _theme() was called with. For example, a
@@ -850,8 +875,8 @@ function theme_get_setting($setting_name, $theme = NULL) {
 
     // Get the values for the theme-specific settings from the .info.yml files
     // of the theme and all its base themes.
-    if ($theme) {
-      $themes = list_themes();
+    $themes = list_themes();
+    if ($theme && isset($themes[$theme])) {
       $theme_object = $themes[$theme];
 
       // Create a list which includes the current theme and all its base themes.
@@ -862,6 +887,7 @@ function theme_get_setting($setting_name, $theme = NULL) {
       else {
         $theme_keys = array($theme);
       }
+      // Read hard-coded default settings from the theme info files.
       foreach ($theme_keys as $theme_key) {
         if (!empty($themes[$theme_key]->info['settings'])) {
           $cache[$theme]->merge($themes[$theme_key]->info['settings']);
@@ -872,13 +898,18 @@ function theme_get_setting($setting_name, $theme = NULL) {
     // Get the global settings from configuration.
     $cache[$theme]->merge(\Drupal::config('system.theme.global')->get());
 
-    if ($theme) {
-      // Get the saved theme-specific settings from the configuration system.
-      $cache[$theme]->merge(\Drupal::config($theme . '.settings')->get());
+    if ($theme && isset($themes[$theme])) {
+      // Retrieve configured theme-specific settings, if any.
+      try {
+        if ($theme_settings = \Drupal::config($theme . '.settings')->get()) {
+          $cache[$theme]->merge($theme_settings);
+        }
+      }
+      catch (StorageException $e) {
+      }
 
       // If the theme does not support a particular feature, override the global
       // setting and set the value to NULL.
-      //$supports = $cache[$theme]->get('supports');
       if (!empty($theme_object->info['features'])) {
         foreach (_system_default_theme_features() as $feature) {
           if (!in_array($feature, $theme_object->info['features'])) {
@@ -968,13 +999,16 @@ function theme_settings_convert_to_config(array $theme_settings, Config $config)
  * @param $theme_list
  *   An array of theme names.
  *
+ * @return bool
+ *   Whether any of the given themes have been enabled.
+ *
  * @deprecated in Drupal 8.x-dev, will be removed before Drupal 8.0.
  *   Use \Drupal::service('theme_handler')->enable().
  *
  * @see \Drupal\Core\Extension\ThemeHandler::enable().
  */
 function theme_enable($theme_list) {
-  \Drupal::service('theme_handler')->enable($theme_list);
+  return \Drupal::service('theme_handler')->enable($theme_list);
 }
 
 /**
@@ -983,13 +1017,16 @@ function theme_enable($theme_list) {
  * @param $theme_list
  *   An array of theme names.
  *
+ * @return bool
+ *   Whether any of the given themes have been disabled.
+ *
  * @deprecated in Drupal 8.x-dev, will be removed before Drupal 8.0.
  *   Use \Drupal::service('theme_handler')->disable().
  *
  * @see \Drupal\Core\Extension\ThemeHandler::disable().
  */
 function theme_disable($theme_list) {
-  \Drupal::service('theme_handler')->disable($theme_list);
+  return \Drupal::service('theme_handler')->disable($theme_list);
 }
 
 /**
@@ -1201,7 +1238,7 @@ function template_preprocess_links(&$variables) {
 
           // Add a "data-drupal-link-system-path" attribute to let the
           // drupal.active-link library know the path in a standardized manner.
-          $li_attributes['data-drupal-link-system-path'] = \Drupal::service('path.alias_manager.cached')->getSystemPath($path);
+          $li_attributes['data-drupal-link-system-path'] = \Drupal::service('path.alias_manager')->getPathByAlias($path);
         }
 
         $item['link'] = $link_element;
@@ -1224,9 +1261,11 @@ function template_preprocess_links(&$variables) {
 }
 
 /**
- * Returns HTML for an image.
+ * Prepares variables for image templates.
  *
- * @param $variables
+ * Default template: image.html.twig.
+ *
+ * @param array $variables
  *   An associative array containing:
  *   - uri: Either the path of the image file (relative to base_path()) or a
  *     full URL.
@@ -1246,17 +1285,14 @@ function template_preprocess_links(&$variables) {
  *     popular browsers.
  *   - attributes: Associative array of attributes to be placed in the img tag.
  */
-function theme_image($variables) {
-  $attributes = $variables['attributes'];
-  $attributes['src'] = file_create_url($variables['uri']);
+function template_preprocess_image(&$variables) {
+  $variables['attributes']['src'] = file_create_url($variables['uri']);
 
   foreach (array('width', 'height', 'alt', 'title') as $key) {
     if (isset($variables[$key])) {
-      $attributes[$key] = $variables[$key];
+      $variables['attributes'][$key] = $variables[$key];
     }
   }
-
-  return '<img' . new Attribute($attributes) . ' />';
 }
 
 /**
@@ -1324,7 +1360,7 @@ function theme_image($variables) {
  * @see drupal_attach_tabledrag()
  */
 function drupal_pre_render_table(array $element) {
-  foreach (element_children($element) as $first) {
+  foreach (Element::children($element) as $first) {
     $row = array('data' => array());
     // Apply attributes of first-level elements as table row attributes.
     if (isset($element[$first]['#attributes'])) {
@@ -1333,7 +1369,7 @@ function drupal_pre_render_table(array $element) {
     // Turn second-level elements into table row columns.
     // @todo Do not render a cell for children of #type 'value'.
     // @see http://drupal.org/node/1248940
-    foreach (element_children($element[$first]) as $second) {
+    foreach (Element::children($element[$first]) as $second) {
       // Assign the element by reference, so any potential changes to the
       // original element are taken over.
       $column = array('data' => &$element[$first][$second]);
@@ -1350,7 +1386,7 @@ function drupal_pre_render_table(array $element) {
   }
 
   // Take over $element['#id'] as HTML ID attribute, if not already set.
-  element_set_attributes($element, array('id'));
+  Element::setAttributes($element, array('id'));
 
 
   // Add sticky headers, if applicable.
@@ -1383,9 +1419,11 @@ function drupal_pre_render_table(array $element) {
 }
 
 /**
- * Returns HTML for a table.
+ * Prepares variables for table templates.
  *
- * @param $variables
+ * Default template: table.html.twig.
+ *
+ * @param array $variables
  *   An associative array containing:
  *   - header: An array containing the table headers. Each element of the array
  *     can be either a localized string or an associative array with the
@@ -1467,175 +1505,175 @@ function drupal_pre_render_table(array $element) {
  *   - empty: The message to display in an extra row if table does not have any
  *     rows.
  */
-function theme_table($variables) {
-  $header = $variables['header'];
-  $rows = $variables['rows'];
-  $attributes = $variables['attributes'];
-  $caption = $variables['caption'];
-  $colgroups = $variables['colgroups'];
-  $sticky = $variables['sticky'];
-  $responsive = $variables['responsive'];
-  $empty = $variables['empty'];
-
-  $output = '<table' . new Attribute($attributes) . ">\n";
-
-  if (isset($caption)) {
-    $output .= '<caption>' . $caption . "</caption>\n";
-  }
+function template_preprocess_table(&$variables) {
+  $is_sticky = !empty($variables['sticky']);
+  $is_responsive = !empty($variables['responsive']);
 
   // Format the table columns:
-  if (count($colgroups)) {
-    foreach ($colgroups as $colgroup) {
-      $attributes = array();
-
+  if (!empty($variables['colgroups'])) {
+    foreach ($variables['colgroups'] as &$colgroup) {
       // Check if we're dealing with a simple or complex column
       if (isset($colgroup['data'])) {
-        foreach ($colgroup as $key => $value) {
-          if ($key == 'data') {
-            $cols = $value;
-          }
-          else {
-            $attributes[$key] = $value;
-          }
-        }
+        $cols = $colgroup['data'];
+        unset($colgroup['data']);
+        $colgroup_attributes = $colgroup;
       }
       else {
         $cols = $colgroup;
+        $colgroup_attributes = array();
       }
+      $colgroup = array();
+      $colgroup['attributes'] = new Attribute($colgroup_attributes);
+      $colgroup['cols'] = array();
 
-      // Build colgroup
-      if (is_array($cols) && count($cols)) {
-        $output .= ' <colgroup' . new Attribute($attributes) . '>';
-        foreach ($cols as $col) {
-          $output .= ' <col' . new Attribute($col) . ' />';
+      // Build columns.
+      if (is_array($cols) && !empty($cols)) {
+        foreach ($cols as $col_key => $col) {
+          $colgroup['cols'][$col_key]['attributes'] = new Attribute($col);
         }
-        $output .= " </colgroup>\n";
-      }
-      else {
-        $output .= ' <colgroup' . new Attribute($attributes) . " />\n";
       }
     }
   }
 
   // Add the 'empty' row message if available.
-  if (!count($rows) && $empty) {
+  if (empty($variables['rows']) && isset($variables['empty'])) {
     $header_count = 0;
-    foreach ($header as $header_cell) {
-      if (is_array($header_cell)) {
-        $header_count += isset($header_cell['colspan']) ? $header_cell['colspan'] : 1;
+    foreach ($variables['header'] as $header_cell) {
+      if (is_array($header_cell) && isset($header_cell['colspan'])) {
+        $header_count += $header_cell['colspan'];
       }
       else {
         $header_count++;
       }
     }
-    $rows[] = array(array('data' => $empty, 'colspan' => $header_count, 'class' => array('empty', 'message')));
+    $variables['rows'][] = array(array(
+      'data' => $variables['empty'],
+      'colspan' => $header_count,
+      'class' => array('empty', 'message'),
+    ));
   }
 
-  $responsive = array();
+  // Build an associative array of responsive classes keyed by column.
+  $responsive_classes = array();
+
   // Format the table header:
-  if (count($header)) {
-    $ts = tablesort_init($header);
-    // HTML requires that the thead tag has tr tags in it followed by tbody
-    // tags. Using ternary operator to check and see if we have any rows.
-    $output .= (count($rows) ? ' <thead><tr>' : ' <tr>');
-    $i = 0;
-    foreach ($header as $cell) {
-      $i++;
-      // Track responsive classes for each column as needed. Only the header
-      // cells for a column are marked up with the responsive classes by a
-      // module developer or themer. The responsive classes on the header cells
-      // must be transferred to the content cells.
-      if (!empty($cell['class']) && is_array($cell['class'])) {
-        if (in_array(RESPONSIVE_PRIORITY_MEDIUM, $cell['class'])) {
-          $responsive[$i] =  RESPONSIVE_PRIORITY_MEDIUM;
-        }
-        elseif (in_array(RESPONSIVE_PRIORITY_LOW, $cell['class'])) {
-          $responsive[$i] =  RESPONSIVE_PRIORITY_LOW;
-        }
+  $ts = array();
+  if (!empty($variables['header'])) {
+    $ts = tablesort_init($variables['header']);
+
+    foreach ($variables['header'] as $col_key => $cell) {
+      if (!is_array($cell)) {
+        $cell_content = $cell;
+        $cell_attributes = new Attribute();
+        $is_header = TRUE;
       }
-      $cell = tablesort_header($cell, $header, $ts);
-      $output .= _theme_table_cell($cell, TRUE);
+      else {
+        $cell_content = '';
+        if (isset($cell['data'])) {
+          $cell_content = $cell['data'];
+          unset($cell['data']);
+        }
+        // Flag the cell as a header or not and remove the flag.
+        $is_header = isset($cell['header']) ? $cell['header'] : TRUE;
+        unset($cell['header']);
+
+        // Track responsive classes for each column as needed. Only the header
+        // cells for a column are marked up with the responsive classes by a
+        // module developer or themer. The responsive classes on the header cells
+        // must be transferred to the content cells.
+        if (!empty($cell['class']) && is_array($cell['class'])) {
+          if (in_array(RESPONSIVE_PRIORITY_MEDIUM, $cell['class'])) {
+            $responsive_classes[$col_key] = RESPONSIVE_PRIORITY_MEDIUM;
+          }
+          elseif (in_array(RESPONSIVE_PRIORITY_LOW, $cell['class'])) {
+            $responsive_classes[$col_key] = RESPONSIVE_PRIORITY_LOW;
+          }
+        }
+
+        if (is_array($cell_content)) {
+          $cell_content = drupal_render($cell_content);
+        }
+
+        tablesort_header($cell_content, $cell, $variables['header'], $ts);
+
+        // tablesort_header() removes the 'sort' and 'field' keys.
+        $cell_attributes = new Attribute($cell);
+      }
+      $variables['header'][$col_key] = array();
+      $variables['header'][$col_key]['tag'] = $is_header ? 'th' : 'td';
+      $variables['header'][$col_key]['attributes'] = $cell_attributes;
+      $variables['header'][$col_key]['content'] = $cell_content;
     }
-    // Using ternary operator to close the tags based on whether or not there are rows
-    $output .= (count($rows) ? " </tr></thead>\n" : "</tr>\n");
-  }
-  else {
-    $ts = array();
   }
 
-  // Format the table rows:
-  if (count($rows)) {
-    $output .= "<tbody>\n";
+  if (!empty($variables['rows'])) {
     $flip = array('even' => 'odd', 'odd' => 'even');
     $class = 'even';
-    foreach ($rows as $row) {
+    foreach ($variables['rows'] as $row_key => $row) {
       // Check if we're dealing with a simple or complex row
       if (isset($row['data'])) {
         $cells = $row['data'];
         $no_striping = isset($row['no_striping']) ? $row['no_striping'] : FALSE;
 
         // Set the attributes array and exclude 'data' and 'no_striping'.
-        $attributes = $row;
-        unset($attributes['data']);
-        unset($attributes['no_striping']);
+        $row_attributes = $row;
+        unset($row_attributes['data']);
+        unset($row_attributes['no_striping']);
       }
       else {
         $cells = $row;
-        $attributes = array();
+        $row_attributes = array();
         $no_striping = FALSE;
       }
-      if (count($cells)) {
-        // Add odd/even class
-        if (!$no_striping) {
-          $class = $flip[$class];
-          $attributes['class'][] = $class;
-        }
 
-        // Build row
-        $output .= ' <tr' . new Attribute($attributes) . '>';
-        $i = 0;
-        foreach ($cells as $cell) {
-          $i++;
-          // Add active class if needed for sortable tables.
-          $cell = tablesort_cell($cell, $header, $ts, $i);
-          // Copy RESPONSIVE_PRIORITY_LOW/RESPONSIVE_PRIORITY_MEDIUM
-          // class from header to cell as needed.
-          if (isset($responsive[$i])) {
-            if (is_array($cell)) {
-              $cell['class'][] = $responsive[$i];
+      // Add odd/even class.
+      if (!$no_striping) {
+        $class = $flip[$class];
+        $row_attributes['class'][] = $class;
+      }
+
+      // Build row.
+      $variables['rows'][$row_key] = array();
+      $variables['rows'][$row_key]['attributes'] = new Attribute($row_attributes);
+      $variables['rows'][$row_key]['cells'] = array();
+      if (!empty($cells)) {
+        foreach ($cells as $col_key => $cell) {
+          if (!is_array($cell)) {
+            $cell_content = $cell;
+            $cell_attributes = array();
+            $is_header = FALSE;
+          }
+          else {
+            $cell_content = '';
+            if (isset($cell['data'])) {
+              $cell_content = $cell['data'];
+              unset($cell['data']);
             }
-            else {
-              $cell = array('data' => $cell, 'class' => $responsive[$i]);
+            // Flag the cell as a header or not and remove the flag.
+            $is_header = !empty($cell['header']);
+            unset($cell['header']);
+
+            $cell_attributes = $cell;
+
+            if (is_array($cell_content)) {
+              $cell_content = drupal_render($cell_content);
             }
           }
-          $output .= _theme_table_cell($cell);
+          // Add active class if needed for sortable tables.
+          if (isset($variables['header'][$col_key]['data']) && $variables['header'][$col_key]['data'] == $ts['name'] && !empty($variables['header'][$col_key]['field'])) {
+            $cell_attributes['class'][] = 'active';
+          }
+          // Copy RESPONSIVE_PRIORITY_LOW/RESPONSIVE_PRIORITY_MEDIUM
+          // class from header to cell as needed.
+          if (isset($responsive_classes[$col_key])) {
+            $cell_attributes['class'][] = $responsive_classes[$col_key];
+          }
+
+          $variables['rows'][$row_key]['cells'][$col_key]['tag'] = $is_header ? 'th' : 'td';
+          $variables['rows'][$row_key]['cells'][$col_key]['attributes'] = new Attribute($cell_attributes);
+          $variables['rows'][$row_key]['cells'][$col_key]['content'] = $cell_content;
         }
-        $output .= " </tr>\n";
       }
-    }
-    $output .= "</tbody>\n";
-  }
-
-  $output .= "</table>\n";
-  return $output;
-}
-
-/**
- * Returns HTML for a marker for new or updated content.
- *
- * @param $variables
- *   An associative array containing:
- *   - type: Number representing the marker type to display. See MARK_NEW,
- *     MARK_UPDATED, MARK_READ.
- */
-function theme_mark($variables) {
-  $type = $variables['status'];
-  if (\Drupal::currentUser()->isAuthenticated()) {
-    if ($type == MARK_NEW) {
-      return ' <span class="marker">' . t('new') . '</span>';
-    }
-    elseif ($type == MARK_UPDATED) {
-      return ' <span class="marker">' . t('updated') . '</span>';
     }
   }
 }
@@ -1683,8 +1721,9 @@ function template_preprocess_item_list(&$variables) {
           // child elements of the nested list, instead of #items. For
           // convenience, we automatically move them into #items.
           if (!isset($child['#items'])) {
-            // This is the same condition as in element_children(), which cannot
-            // be used here, since it triggers an error on string values.
+            // This is the same condition as in
+            // \Drupal\Core\Render\Element::children(), which cannot be used
+            // here, since it triggers an error on string values.
             foreach ($child as $child_key => $child_value) {
               if ($child_key[0] !== '#') {
                 $child['#items'][$child_key] = $child_value;
@@ -1793,47 +1832,6 @@ function template_preprocess_container(&$variables) {
  */
 
 /**
- * Returns HTML output for a single table cell for theme_table().
- *
- * @param $cell
- *   Array of cell information, or string to display in cell.
- * @param bool $header
- *   TRUE if this cell is a table header cell, FALSE if it is an ordinary
- *   table cell. If $cell is an array with element 'header' set to TRUE, that
- *   will override the $header parameter.
- *
- * @return
- *   HTML for the cell.
- */
-function _theme_table_cell($cell, $header = FALSE) {
-  $attributes = '';
-
-  if (is_array($cell)) {
-    $data = isset($cell['data']) ? $cell['data'] : '';
-    // Cell's data property can be a string or a renderable array.
-    if (is_array($data)) {
-      $data = drupal_render($data);
-    }
-    $header |= isset($cell['header']);
-    unset($cell['data']);
-    unset($cell['header']);
-    $attributes = new Attribute($cell);
-  }
-  else {
-    $data = $cell;
-  }
-
-  if ($header) {
-    $output = "<th$attributes>$data</th>";
-  }
-  else {
-    $output = "<td$attributes>$data</td>";
-  }
-
-  return $output;
-}
-
-/**
  * Adds a default set of helper variables for preprocessors and templates.
  *
  * This function is called for theme hooks implemented as templates only, not
@@ -1926,6 +1924,22 @@ function drupal_pre_render_html(array $element) {
 
   return $element;
 }
+
+/**
+ * #pre_render callback for the page element type.
+ *
+ * @param array $element
+ *   A structured array containing the page element type build properties.
+ *
+ * @see system_element_info()
+ */
+function drupal_pre_render_page(array $element) {
+  global $theme;
+  $element['#cache']['tags']['theme'] = $theme;
+  $element['#cache']['tags']['theme_global_settings'] = TRUE;
+  return $element;
+}
+
 /**
  * Prepares variables for HTML document templates.
  *
@@ -1935,7 +1949,7 @@ function drupal_pre_render_html(array $element) {
  *   An associative array containing:
  *   - page: A render element representing the page.
  *
- * @see system_elements()
+ * @see system_element_info()
  */
 function template_preprocess_html(&$variables) {
   /** @var $page \Drupal\Core\Page\HtmlPage */
@@ -1943,7 +1957,7 @@ function template_preprocess_html(&$variables) {
 
   $variables['html_attributes'] = $page->getHtmlAttributes();
   $variables['attributes'] = $page->getBodyAttributes();
-  $variables['page'] = $page->getContent();
+  $variables['page'] = $page;
 
   // Compile a list of classes that are going to be applied to the body element.
   // This allows advanced theming based on context (home page, node of certain type, etc.).
@@ -1955,8 +1969,9 @@ function template_preprocess_html(&$variables) {
   $body_classes[] = $variables['logged_in'] ? 'logged-in' : 'not-logged-in';
   $variables['attributes']['class'] = $body_classes;
 
+  $path_args = explode('/', current_path());
   // Populate the body classes.
-  if ($suggestions = theme_get_suggestions(arg(), 'page', '-')) {
+  if ($suggestions = theme_get_suggestions($path_args, 'page', '-')) {
     foreach ($suggestions as $suggestion) {
       if ($suggestion != 'page-front') {
         // Add current suggestion to page classes to make it possible to theme
@@ -1971,7 +1986,7 @@ function template_preprocess_html(&$variables) {
   // Construct page title.
   if ($page->hasTitle()) {
     $head_title = array(
-      'title' => strip_tags($page->getTitle()),
+      'title' => trim(strip_tags($page->getTitle())),
       'name' => String::checkPlain($site_config->get('name')),
     );
   }
@@ -1986,53 +2001,34 @@ function template_preprocess_html(&$variables) {
   else {
     $head_title = array('name' => String::checkPlain($site_config->get('name')));
     if ($site_config->get('slogan')) {
-      $head_title['slogan'] = strip_tags(filter_xss_admin($site_config->get('slogan')));
+      $head_title['slogan'] = strip_tags(Xss::filterAdmin($site_config->get('slogan')));
     }
   }
 
   $variables['head_title_array'] = $head_title;
   $variables['head_title'] = implode(' | ', $head_title);
 
-  // Display the html.html.twig's default mobile metatags for responsive design.
-  $elements = array(
-    'MobileOptimized' => array(
-      '#tag' => 'meta',
-      '#attributes' => array(
-        'name' => 'MobileOptimized',
-        'content' => 'width',
-      ),
-    ),
-    'HandheldFriendly' => array(
-      '#tag' => 'meta',
-      '#attributes' => array(
-        'name' => 'HandheldFriendly',
-        'content' => 'true',
-      ),
-    ),
-    'viewport' => array(
-      '#tag' => 'meta',
-      '#attributes' => array(
-        'name' => 'viewport',
-        'content' => 'width=device-width',
-      ),
-    ),
-  );
-  foreach ($elements as $name => $element) {
-    drupal_add_html_head($element, $name);
+  // @todo Remove drupal_*_html_head() and refactor accordingly.
+  $html_heads = drupal_get_html_head(FALSE);
+  uasort($html_heads, 'Drupal\Component\Utility\SortArray::sortByWeightElement');
+  foreach ($html_heads as $name => $tag) {
+    if ($tag['#tag'] == 'link') {
+      $link = new LinkElement($name, isset($tag['#attributes']['content']) ? $tag['#attributes']['content'] : NULL, $tag['#attributes']);
+      if (!empty($tag['#noscript'])) {
+        $link->setNoScript();
+      }
+      $page->addLinkElement($link);
+    }
+    elseif ($tag['#tag'] == 'meta') {
+      $metatag = new MetaElement(NULL, $tag['#attributes']);
+      if (!empty($tag['#noscript'])) {
+        $metatag->setNoScript();
+      }
+      $page->addMetaElement($metatag);
+    }
   }
-
   $variables['page_top'][] = array('#markup' => $page->getBodyTop());
   $variables['page_bottom'][] = array('#markup' => $page->getBodyBottom());
-
-  // Add footer scripts as '#markup' so they can be rendered with other
-  // elements in page_bottom.
-  $footer_scripts = new RenderWrapper('drupal_get_js', array('footer'));
-  $variables['page_bottom'][] = array('#markup' => $footer_scripts);
-
-  // Wrap function calls in an object so they can be called when printed.
-  $variables['head'] = new RenderWrapper('drupal_get_html_head');
-  $variables['styles'] = new RenderWrapper('drupal_get_css');
-  $variables['scripts'] = new RenderWrapper('drupal_get_js');
 }
 
 /**
@@ -2043,9 +2039,6 @@ function template_preprocess_html(&$variables) {
  * Most themes utilize their own copy of page.html.twig. The default is located
  * inside "modules/system/page.html.twig". Look in there for the full list of
  * variables.
- *
- * Uses the arg() function to generate a series of page template suggestions
- * based on the current path.
  *
  * @see drupal_render_page()
  */
@@ -2074,16 +2067,38 @@ function template_preprocess_page(&$variables) {
 
   $variables['base_path']         = base_path();
   $variables['front_page']        = url();
-  $variables['feed_icons']        = drupal_get_feeds();
   $variables['language']          = $language_interface;
   $variables['language']->dir     = $language_interface->direction ? 'rtl' : 'ltr';
   $variables['logo']              = theme_get_setting('logo.url');
-  $variables['main_menu']         = theme_get_setting('features.main_menu') ? menu_main_menu() : array();
-  $variables['secondary_menu']    = theme_get_setting('features.secondary_menu') ? menu_secondary_menu() : array();
-  $variables['action_links']      = menu_get_local_actions();
   $variables['site_name']         = (theme_get_setting('features.name') ? String::checkPlain($site_config->get('name')) : '');
-  $variables['site_slogan']       = (theme_get_setting('features.slogan') ? filter_xss_admin($site_config->get('slogan')) : '');
-  $variables['tabs']              = menu_local_tabs();
+  $variables['site_slogan']       = (theme_get_setting('features.slogan') ? Xss::filterAdmin($site_config->get('slogan')) : '');
+
+  if (!defined('MAINTENANCE_MODE')) {
+    $variables['main_menu']      = theme_get_setting('features.main_menu') ? menu_main_menu() : array();
+    $variables['secondary_menu'] = theme_get_setting('features.secondary_menu') ? menu_secondary_menu() : array();
+    $variables['action_links']   = menu_get_local_actions();
+    $variables['tabs']           = menu_local_tabs();
+
+    // Convert drupal_get_feeds to feed links on the page object.
+    /** @var \Drupal\Core\Page\HtmlPage $page */
+    $page = $variables['page']['#page'];
+    // Render the feed icons.
+    $variables['feed_icons'] = array();
+    foreach ($page->getFeedLinkElements() as $link) {
+      $variables['feed_icons'][] = array(
+        '#theme' => 'feed_icon',
+        '#url' => $link->getAttributes()['href'],
+        '#title' => $link->getAttributes()['title'],
+      );
+    }
+  }
+  else {
+    $variables['main_menu']      = array();
+    $variables['secondary_menu'] = array();
+    $variables['action_links']   = array();
+    $variables['tabs']           = array();
+    $variables['feed_icons']     = '';
+  }
 
   // Pass the main menu and secondary menu to the template as render arrays.
   if (!empty($variables['main_menu'])) {
@@ -2093,6 +2108,7 @@ function template_preprocess_page(&$variables) {
       '#heading' => array(
         'text' => t('Main menu'),
         'class' => array('visually-hidden'),
+        'attributes' => array('id' => 'links__system_main_menu'),
       ),
       '#set_active_class' => TRUE,
     );
@@ -2104,12 +2120,13 @@ function template_preprocess_page(&$variables) {
       '#heading' => array(
         'text' => t('Secondary menu'),
         'class' => array('visually-hidden'),
+        'attributes' => array('id' => 'links__system_secondary_menu'),
       ),
       '#set_active_class' => TRUE,
     );
   }
 
-  if ($node = \Drupal::request()->attributes->get('node')) {
+  if ($node = \Drupal::routeMatch()->getParameter('node')) {
     $variables['node'] = $node;
   }
 
@@ -2124,10 +2141,12 @@ function template_preprocess_page(&$variables) {
   // re-use the cache of an already retrieved menu containing the active link
   // for the current page.
   // @see menu_tree_page_data()
-  $variables['breadcrumb'] = array(
-    '#theme' => 'breadcrumb',
-    '#breadcrumb' => \Drupal::service('breadcrumb')->build(\Drupal::request()->attributes->all()),
-  );
+  if (!defined('MAINTENANCE_MODE')) {
+    $variables['breadcrumb'] = array(
+      '#theme' => 'breadcrumb',
+      '#breadcrumb' => \Drupal::service('breadcrumb')->build(\Drupal::routeMatch()),
+    );
+  }
 }
 
 /**
@@ -2139,7 +2158,7 @@ function template_preprocess_page(&$variables) {
  * additional suggestions or classes on the path of the current page.
  *
  * @param $args
- *   An array of path arguments, such as from function arg().
+ *   An array of path arguments.
  * @param $base
  *   A string identifying the base 'thing' from which more specific suggestions
  *   are derived. For example, 'page' or 'html'.
@@ -2205,12 +2224,6 @@ function theme_get_suggestions($args, $base, $delimiter = '__') {
  *
  * Default template: maintenance-page.html.twig.
  *
- * The variables array generated here is a mirror of
- * template_preprocess_page(). This preprocessor will run its course when
- * theme_maintenance_page() is invoked. An alternate template file of
- * maintenance-page--offline.html.twig can be used when the database is offline
- * to hide errors and completely replace the content.
- *
  * @param array $variables
  *   An associative array containing:
  *   - content - An array of page content.
@@ -2218,117 +2231,29 @@ function theme_get_suggestions($args, $base, $delimiter = '__') {
  * @see system_page_build()
  */
 function template_preprocess_maintenance_page(&$variables) {
-  $language_interface = \Drupal::languageManager()->getCurrentLanguage();
+  // @todo Rename the templates to page--maintenance + page--install.
+  template_preprocess_page($variables);
 
-  // Initializes attributes which are specific to the html element.
-  $variables['html_attributes'] = new Attribute;
-
-  // HTML element attributes.
-  $variables['html_attributes']['lang'] = $language_interface->id;
-  $variables['html_attributes']['dir'] = $language_interface->direction ? 'rtl' : 'ltr';
-
-  // Add favicon
-  if (theme_get_setting('features.favicon')) {
-    $favicon = theme_get_setting('favicon.url');
-    $type = theme_get_setting('favicon.mimetype');
-    $build['#attached']['drupal_add_html_head_link'][][] = array(
-      'rel' => 'shortcut icon',
-      'href' => UrlHelper::stripDangerousProtocols($favicon),
-      'type' => $type,
-    );
-    drupal_render($build);
-  }
-
-  foreach (system_region_list($GLOBALS['theme']) as $region_key => $region_name) {
-    if (!isset($variables[$region_key])) {
-      $variables[$region_key] = array();
-    }
-    // Append region content set with drupal_add_region_content() as markup.
-    if ($region_content = drupal_get_region_content($region_key)) {
-      $variables[$region_key][]['#markup'] = $region_content;
-    }
-  }
-
-  // Setup layout variable.
-  $variables['layout'] = 'none';
-  if (!empty($variables['sidebar_first'])) {
-    $variables['layout'] = 'first';
-  }
-  if (!empty($variables['sidebar_second'])) {
-    $variables['layout'] = ($variables['layout'] == 'first') ? 'both' : 'second';
-  }
-
-  $site_config = \Drupal::config('system.site');
-  $site_name = $site_config->get('name');
-  $site_slogan = $site_config->get('slogan');
-
-   // Construct the page title.
-  if (isset($variables['page']['#title'])) {
-    $head_title = array(
-      'title' => strip_tags($variables['page']['#title']),
-      'name' => String::checkPlain($site_config->get('name')),
-    );
-  }
-  else {
-    $head_title = array('name' => String::checkPlain($site_name));
-    if ($site_slogan) {
-      $head_title['slogan'] = strip_tags(filter_xss_admin($site_slogan));
-    }
-  }
-
-  // These are usually added from system_page_build() except maintenance.css.
-  // When the database is inactive it's not called so we add it here.
-  $default_css['library'][] = 'core/normalize';
-  $default_css['library'][] = 'system/maintenance';
-  $attached = array('#attached' => $default_css);
-  drupal_render($attached);
-  $variables['messages'] = array(
-    '#theme' => 'status_messages',
-    '#access' => $variables['show_messages'],
-  );
-
-  $variables['head_title_array']  = $head_title;
-  $variables['head_title']        = implode(' | ', $head_title);
-  $variables['front_page']        = url();
-  $variables['help']              = '';
-  $variables['language']          = $language_interface;
-  $variables['logo']              = theme_get_setting('logo.url');
-  $variables['site_name']         = (theme_get_setting('features.name') ? String::checkPlain($site_name) : '');
-  $variables['site_slogan']       = (theme_get_setting('features.slogan') ? filter_xss_admin($site_slogan) : '');
-
-  // Compile a list of classes that are going to be applied to the body element.
-  $variables['attributes']['class'][] = 'maintenance-page';
-  $variables['attributes']['class'][] = 'in-maintenance';
+  $page_object = $variables['page']['#page'];
+  $attributes = $page_object->getBodyAttributes();
+  $classes = $attributes['class'];
+  $classes[] = 'maintenance-page';
+  $classes[] = 'in-maintenance';
   if (isset($variables['db_is_active']) && !$variables['db_is_active']) {
-    $variables['attributes']['class'][] = 'db-offline';
+    $classes[] = 'db-offline';
   }
-  if ($variables['layout'] == 'both') {
-    $variables['attributes']['class'][] = 'two-sidebars';
-  }
-  elseif ($variables['layout'] == 'none') {
-    $variables['attributes']['class'][] = 'no-sidebars';
-  }
-  else {
-    $variables['attributes']['class'][] = 'one-sidebar';
-    $variables['attributes']['class'][] = 'sidebar-' . $variables['layout'];
-  }
+  $attributes['class'] = $classes;
 
-  $variables['head'] = drupal_get_html_head();
-
-  // While this code is used in the installer, the language module may not be
-  // enabled yet (even maybe no database set up yet), but an RTL language
-  // selected should result in RTL stylesheets loaded properly already.
-  $css = _drupal_add_css();
-  include_once DRUPAL_ROOT . '/core/modules/language/language.module';
-  // Wrapping drupal_get_css() and drupal_get_js() in an object so they can
-  // be called when printed.
-  $variables['styles'] = new RenderWrapper('drupal_get_css', array($css));
-  $variables['scripts'] = new RenderWrapper('drupal_get_js');
-
-  // Allow the page to define a title.
-  if (isset($variables['page']['#title'])) {
-    $variables['title'] = $variables['page']['#title'];
-  }
+  // @see system_page_build()
+  $attached = array(
+    '#attached' => array(
+      'library' => array(
+        'core/normalize',
+        'system/maintenance',
+      ),
+    ),
+  );
+  drupal_render($attached);
 }
 
 /**
@@ -2336,20 +2261,21 @@ function template_preprocess_maintenance_page(&$variables) {
  *
  * Default template: install-page.html.twig.
  *
- * The variables array generated here is a mirror of
- * template_preprocess_page(). This preprocessor will run its course when
- * theme_install_page() is invoked.
- *
  * @param array $variables
  *   An associative array containing:
  *   - content - An array of page content.
  *
  * @see template_preprocess_maintenance_page()
- *
  */
 function template_preprocess_install_page(&$variables) {
   template_preprocess_maintenance_page($variables);
-  $variables['attributes']['class'][] = 'install-page';
+
+  $page_object = $variables['page']['#page'];
+  $attributes = $page_object->getBodyAttributes();
+  $classes = $attributes['class'];
+  $classes[] = 'install-page';
+  $attributes['class'] = $classes;
+
   // Override the site name that is displayed on the page, since Drupal is
   // still in the process of being installed.
   $distribution_name = String::checkPlain(drupal_install_profile_distribution_name());
@@ -2379,6 +2305,178 @@ function template_preprocess_region(&$variables) {
 
   $variables['attributes']['class'][] = 'region';
   $variables['attributes']['class'][] = drupal_html_class('region-' . $variables['region']);
+}
+
+/**
+ * Prepares variables for field templates.
+ *
+ * Default template: field.html.twig.
+ *
+ * @param array $variables
+ *   An associative array containing:
+ *   - element: A render element representing the field.
+ *   - attributes: A string containing the attributes for the wrapping div.
+ *   - title_attributes: A string containing the attributes for the title.
+ *   - content_attributes: A string containing the attributes for the content's
+ *     div.
+ */
+function template_preprocess_field(&$variables, $hook) {
+  $element = $variables['element'];
+
+  $variables['label_hidden'] = ($element['#label_display'] == 'hidden');
+  // Always set the field label - allow themes to decide whether to display it.
+  // In addition the label should be rendered but hidden to support screen
+  // readers.
+  $variables['label'] = String::checkPlain($element['#title']);
+
+  // We want other preprocess functions and the theme implementation to have
+  // fast access to the field item render arrays. The item render array keys
+  // (deltas) should always be numerically indexed starting from 0, and looping
+  // on those keys is faster than calling
+  // \Drupal\Core\Render\Element::children() or looping on all keys within
+  // $element, since that requires traversal of all element properties.
+  $variables['items'] = array();
+  $delta = 0;
+  while (!empty($element[$delta])) {
+    $variables['items'][$delta] = $element[$delta];
+    $delta++;
+  }
+
+  // Add default CSS classes. Since there can be many fields rendered on a page,
+  // save some overhead by calling strtr() directly instead of
+  // drupal_html_class().
+  $variables['entity_type_css'] = strtr($element['#entity_type'], '_', '-');
+  $variables['field_name_css'] = strtr($element['#field_name'], '_', '-');
+  $variables['field_type_css'] = strtr($element['#field_type'], '_', '-');
+  $variables['attributes']['class'] = array(
+    'field',
+    'field-' . $variables['entity_type_css'] . '--' . $variables['field_name_css'],
+    'field-name-' . $variables['field_name_css'],
+    'field-type-' . $variables['field_type_css'],
+    'field-label-' . $element['#label_display'],
+  );
+  // Add a "clearfix" class to the wrapper since we float the label and the
+  // field items in field.module.css if the label is inline.
+  if ($element['#label_display'] == 'inline') {
+    $variables['attributes']['class'][] = 'clearfix';
+  }
+
+  static $default_attributes;
+  if (!isset($default_attributes)) {
+    $default_attributes = new Attribute;
+  }
+
+  // Modules (e.g., rdf.module) can add field item attributes (to
+  // $item->_attributes) within hook_entity_prepare_view(). Some field
+  // formatters move those attributes into some nested formatter-specific
+  // element in order have them rendered on the desired HTML element (e.g., on
+  // the <a> element of a field item being rendered as a link). Other field
+  // formatters leave them within $element['#items'][$delta]['_attributes'] to
+  // be rendered on the item wrappers provided by field.html.twig.
+  foreach ($variables['items'] as $delta => $item) {
+    $variables['item_attributes'][$delta] = !empty($element['#items'][$delta]->_attributes) ? new Attribute($element['#items'][$delta]->_attributes) : clone($default_attributes);
+  }
+}
+
+/**
+ * Prepares variables for individual form element templates.
+ *
+ * Default template: field-multiple-value-form.html.twig.
+ *
+ * Combines multiple values into a table with drag-n-drop reordering.
+ *
+ * @param array $variables
+ *   An associative array containing:
+ *   - element: A render element representing the form element.
+ */
+function template_preprocess_field_multiple_value_form(&$variables) {
+  $element = $variables['element'];
+  $variables['multiple'] = $element['#cardinality_multiple'];
+
+  if ($variables['multiple']) {
+    $table_id = drupal_html_id($element['#field_name'] . '_values');
+    $order_class = $element['#field_name'] . '-delta-order';
+    $header = array(
+      array(
+        'data' => array(
+          '#prefix' => '<h4 class="label">',
+          'title' => array(
+            '#markup' => t($element['#title']),
+          ),
+          '#suffix' => '</h4>',
+        ),
+        'colspan' => 2,
+        'class' => array('field-label'),
+      ),
+      t('Order', array(), array('context' => 'Sort order')),
+    );
+    if (!empty($element['#required'])) {
+      $header[0]['data']['required'] = array(
+        '#theme' => 'form_required_marker',
+        '#element' => $element,
+      );
+    }
+    $rows = array();
+
+    // Sort items according to '_weight' (needed when the form comes back after
+    // preview or failed validation).
+    $items = array();
+    $variables['button'] = array();
+    foreach (Element::children($element) as $key) {
+      if ($key === 'add_more') {
+        $variables['button'] = &$element[$key];
+      }
+      else {
+        $items[] = &$element[$key];
+      }
+    }
+    usort($items, '_field_sort_items_value_helper');
+
+    // Add the items as table rows.
+    foreach ($items as $item) {
+      $item['_weight']['#attributes']['class'] = array($order_class);
+
+      // Remove weight form element from item render array so it can be rendered
+      // in a separate table column.
+      $delta_element = $item['_weight'];
+      unset($item['_weight']);
+
+      $cells = array(
+        array('data' => '', 'class' => array('field-multiple-drag')),
+        array('data' => $item),
+        array('data' => $delta_element, 'class' => array('delta-order')),
+      );
+      $rows[] = array(
+        'data' => $cells,
+        'class' => array('draggable'),
+      );
+    }
+
+    $variables['table'] = array(
+      '#type' => 'table',
+      '#header' => $header,
+      '#rows' => $rows,
+      '#attributes' => array(
+        'id' => $table_id,
+        'class' => array('field-multiple-table'),
+      ),
+      '#tabledrag' => array(
+        array(
+          'action' => 'order',
+          'relationship' => 'sibling',
+          'group' => $order_class,
+        ),
+      ),
+    );
+
+    $variables['description'] = $element['#description'];
+  }
+  else {
+    $variables['elements'] = array();
+    foreach (Element::children($element) as $key) {
+      $variables['elements'][] = $element[$key];
+    }
+  }
 }
 
 /**
@@ -2429,6 +2527,7 @@ function drupal_common_theme() {
       // The title attribute is optional in all cases, so it is omitted by
       // default.
       'variables' => array('uri' => NULL, 'width' => NULL, 'height' => NULL, 'alt' => '', 'title' => NULL, 'attributes' => array()),
+      'template' => 'image',
     ),
     'breadcrumb' => array(
       'variables' => array('breadcrumb' => NULL),
@@ -2436,6 +2535,7 @@ function drupal_common_theme() {
     ),
     'table' => array(
       'variables' => array('header' => NULL, 'rows' => NULL, 'attributes' => array(), 'caption' => NULL, 'colgroups' => array(), 'sticky' => FALSE, 'responsive' => TRUE, 'empty' => ''),
+      'template' => 'table',
     ),
     'tablesort_indicator' => array(
       'variables' => array('style' => NULL),
@@ -2443,6 +2543,7 @@ function drupal_common_theme() {
     ),
     'mark' => array(
       'variables' => array('status' => MARK_NEW),
+      'template' => 'mark',
     ),
     'item_list' => array(
       'variables' => array('items' => array(), 'title' => '', 'list_type' => 'ul', 'attributes' => array(), 'empty' => NULL),
@@ -2464,11 +2565,11 @@ function drupal_common_theme() {
     ),
     // From theme.maintenance.inc.
     'maintenance_page' => array(
-      'variables' => array('content' => NULL, 'show_messages' => TRUE, 'page' => array()),
+      'render element' => 'page',
       'template' => 'maintenance-page',
     ),
     'install_page' => array(
-      'variables' => array('content' => NULL, 'show_messages' => TRUE, 'page' => array()),
+      'render element' => 'page',
       'template' => 'install-page',
     ),
     'task_list' => array(
@@ -2504,6 +2605,7 @@ function drupal_common_theme() {
     // From form.inc.
     'input' => array(
       'render element' => 'element',
+      'template' => 'input',
     ),
     'select' => array(
       'render element' => 'element',
@@ -2519,12 +2621,11 @@ function drupal_common_theme() {
     ),
     'radios' => array(
       'render element' => 'element',
-    ),
-    'date' => array(
-      'render element' => 'element',
+      'template' => 'radios',
     ),
     'checkboxes' => array(
       'render element' => 'element',
+      'template' => 'checkboxes',
     ),
     'form' => array(
       'render element' => 'element',
@@ -2541,11 +2642,9 @@ function drupal_common_theme() {
       'render element' => 'element',
       'template' => 'form-element',
     ),
-    'form_required_marker' => array(
-      'render element' => 'element',
-    ),
     'form_element_label' => array(
       'render element' => 'element',
+      'template' => 'form-element-label',
     ),
     'vertical_tabs' => array(
       'render element' => 'element',
@@ -2554,6 +2653,15 @@ function drupal_common_theme() {
     'container' => array(
       'render element' => 'element',
       'template' => 'container',
+    ),
+    // From field system.
+    'field' => array(
+      'render element' => 'element',
+      'template' => 'field',
+    ),
+    'field_multiple_value_form' => array(
+      'render element' => 'element',
+      'template' => 'field-multiple-value-form',
     ),
   );
 }

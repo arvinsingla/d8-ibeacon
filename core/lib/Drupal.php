@@ -188,9 +188,19 @@ class Drupal {
   }
 
   /**
+   * Retrieves the currently active route match object.
+   *
+   * @return \Drupal\Core\Routing\RouteMatchInterface
+   *   The currently active route match object.
+   */
+  public static function routeMatch() {
+    return static::$container->get('current_route_match');
+  }
+
+  /**
    * Gets the current active user.
    *
-   * @return \Drupal\Core\Session\AccountInterface
+   * @return \Drupal\Core\Session\AccountProxyInterface
    */
   public static function currentUser() {
     return static::$container->get('current_user');
@@ -221,12 +231,14 @@ class Drupal {
    *
    * @param string $bin
    *   (optional) The cache bin for which the cache object should be returned,
-   *   defaults to 'cache'.
+   *   defaults to 'default'.
    *
    * @return \Drupal\Core\Cache\CacheBackendInterface
    *   The cache object associated with the specified bin.
+   *
+   * @ingroup cache
    */
-  public static function cache($bin = 'cache') {
+  public static function cache($bin = 'default') {
     return static::$container->get('cache.' . $bin);
   }
 
@@ -334,7 +346,7 @@ class Drupal {
    * needs to be the same across development, production, etc. environments
    * (for example, the system maintenance message) should use \Drupal::config() instead.
    *
-   * @return \Drupal\Core\KeyValueStore\StateInterface
+   * @return \Drupal\Core\State\StateInterface
    */
   public static function state() {
     return static::$container->get('state');
@@ -343,11 +355,11 @@ class Drupal {
   /**
    * Returns the default http client.
    *
-   * @return \Guzzle\Http\ClientInterface
+   * @return \GuzzleHttp\ClientInterface
    *   A guzzle http client instance.
    */
   public static function httpClient() {
-    return static::$container->get('http_default_client');
+    return static::$container->get('http_client');
   }
 
   /**
@@ -377,7 +389,7 @@ class Drupal {
    *   AND if all conditions in the query need to apply, OR if any of them is
    *   enough. Optional, defaults to AND.
    *
-   * @return \Drupal\Core\Entity\Query\QueryInterface
+   * @return \Drupal\Core\Entity\Query\QueryAggregateInterface
    *   The query object that can query the given entity type.
    */
   public static function entityQueryAggregate($entity_type, $conjunction = 'AND') {
@@ -459,7 +471,8 @@ class Drupal {
    *     displayed outside the site, such as in an RSS feed.
    *   - 'language': An optional language object used to look up the alias
    *     for the URL. If $options['language'] is omitted, the language will be
-   *     obtained from \Drupal::languageManager()->getCurrentLanguage(Language::TYPE_URL).
+   *     obtained from
+   *     \Drupal::languageManager()->getCurrentLanguage(LanguageInterface::TYPE_URL).
    *   - 'https': Whether this URL should point to a secure location. If not
    *     defined, the current scheme is used, so the user stays on HTTP or HTTPS
    *     respectively. if mixed mode sessions are permitted, TRUE enforces HTTPS
@@ -584,7 +597,7 @@ class Drupal {
    * @return \Drupal\Core\Access\CsrfTokenGenerator
    *   The CSRF token manager.
    *
-   * @see drupal_session_start()
+   * @see \Drupal\Core\Session\SessionManager::start()
    */
   public static function csrfToken() {
     return static::$container->get('csrf_token');
@@ -608,6 +621,30 @@ class Drupal {
    */
   public static function formBuilder() {
     return static::$container->get('form_builder');
+  }
+
+  /**
+   * Gets the syncing state.
+   *
+   * @return bool
+   *   Returns TRUE is syncing flag set.
+   */
+  public static function isConfigSyncing() {
+    return static::$container->get('config.installer')->isSyncing();
+  }
+
+  /**
+   * Returns a channel logger object.
+   *
+   * @param string $channel
+   *   The name of the channel. Can be any string, but the general practice is
+   *   to use the name of the subsystem calling this.
+   *
+   * @return \Drupal\Core\Logger\LoggerChannelInterface
+   *   The logger for this channel.
+   */
+  public static function logger($channel) {
+    return static::$container->get('logger.factory')->get($channel);
   }
 
 }

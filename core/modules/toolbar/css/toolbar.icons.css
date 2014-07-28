@@ -209,6 +209,9 @@
 .no-svg .toolbar-icon-help.active:before {
   background-image: url("../../../misc/icons/000000/questionmark-disc.png");
 }
+.toolbar .toolbar-bar .toolbar-icon:before {
+  min-height: 3em;
+}
 
 @media only screen and (min-width: 16.5em) {
   .toolbar .toolbar-bar .toolbar-icon {
@@ -269,19 +272,9 @@
 }
 .toolbar .toolbar-icon.toolbar-handle:before {
   background-image: url("../../../misc/icons/5181c6/chevron-disc-down.svg");
-  left: 0; /* LTR */
 }
 .no-svg .toolbar .toolbar-icon.toolbar-handle:before {
   background-image: url("../../../misc/icons/5181c6/chevron-disc-down.png");
-  left: 0; /* LTR */
-}
-[dir="rtl"] .toolbar .toolbar-icon.toolbar-handle:before {
-  left: auto;
-  right: 0;
-}
-[dir="rtl"].no-svg .toolbar .toolbar-icon.toolbar-handle:before {
-  left: auto;
-  right: 0;
 }
 .toolbar .toolbar-icon.toolbar-handle.open:before {
   background-image: url("../../../misc/icons/787878/chevron-disc-up.svg");
@@ -344,25 +337,30 @@
 .toolbar .toolbar-toggle-orientation [value="vertical"]:before {
   background-image: url("../../../misc/icons/bebebe/push-left.svg"); /* LTR */
 }
-.toolbar .toolbar-toggle-orientation [value="vertical"]:hover:before {
+.toolbar .toolbar-toggle-orientation [value="vertical"]:hover:before,
+.toolbar .toolbar-toggle-orientation [value="vertical"]:focus:before
+ {
   background-image: url("../../../misc/icons/787878/push-left.svg"); /* LTR */
 }
 .no-svg .toolbar .toolbar-toggle-orientation [value="vertical"]:before {
   background-image: url("../../../misc/icons/bebebe/push-left.png"); /* LTR */
 }
-.no-svg .toolbar .toolbar-toggle-orientation [value="vertical"]:hover:before {
+.no-svg .toolbar .toolbar-toggle-orientation [value="vertical"]:hover:before,
+.no-svg .toolbar .toolbar-toggle-orientation [value="vertical"]:focus:before {
   background-image: url("../../../misc/icons/787878/push-left.png"); /* LTR */
 }
 [dir="rtl"] .toolbar .toolbar-toggle-orientation [value="vertical"]:before {
   background-image: url("../../../misc/icons/bebebe/push-right.svg");
 }
-[dir="rtl"] .toolbar .toolbar-toggle-orientation [value="vertical"]:hover:before {
+[dir="rtl"] .toolbar .toolbar-toggle-orientation [value="vertical"]:hover:before,
+[dir="rtl"] .toolbar .toolbar-toggle-orientation [value="vertical"]:focus:before {
   background-image: url("../../../misc/icons/787878/push-right.svg");
 }
 [dir="rtl"].no-svg .toolbar .toolbar-toggle-orientation [value="vertical"]:before {
   background-image: url("../../../misc/icons/bebebe/push-right.png");
 }
-[dir="rtl"].no-svg .toolbar .toolbar-toggle-orientation [value="vertical"]:hover:before {
+[dir="rtl"].no-svg .toolbar .toolbar-toggle-orientation [value="vertical"]:hover:before,
+[dir="rtl"].no-svg .toolbar .toolbar-toggle-orientation [value="vertical"]:focus:before {
   background-image: url("../../../misc/icons/787878/push-right.png");
 }
 .toolbar .toolbar-toggle-orientation [value="horizontal"]:before {
@@ -374,7 +372,8 @@
 .no-svg .toolbar .toolbar-toggle-orientation [value="horizontal"]:before {
   background-image: url("../../../misc/icons/bebebe/push-up.png");
 }
-.no-svg .toolbar .toolbar-toggle-orientation [value="horizontal"]:hover:before {
+.no-svg .toolbar .toolbar-toggle-orientation [value="horizontal"]:hover:before,
+.no-svg .toolbar .toolbar-toggle-orientation [value="horizontal"]:focus:before {
   background-image: url("../../../misc/icons/787878/push-up.png");
 }
 

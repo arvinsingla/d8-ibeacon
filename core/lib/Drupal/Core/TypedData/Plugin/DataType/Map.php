@@ -20,6 +20,8 @@ use Drupal\Core\TypedData\ComplexDataInterface;
  * By default there is no metadata for contained properties. Extending classes
  * may want to override Map::getPropertyDefinitions() to define it.
  *
+ * @ingroup typed_data
+ *
  * @DataType(
  *   id = "map",
  *   label = @Translation("Map"),
@@ -162,23 +164,14 @@ class Map extends TypedData implements \IteratorAggregate, ComplexDataInterface 
   }
 
   /**
-   * Implements \Drupal\Core\TypedData\ComplexDataInterface::getPropertyValues().
+   * {@inheritdoc}
    */
-  public function getPropertyValues() {
+  public function toArray() {
     $values = array();
     foreach ($this->getProperties() as $name => $property) {
       $values[$name] = $property->getValue();
     }
     return $values;
-  }
-
-  /**
-   * Implements \Drupal\Core\TypedData\ComplexDataInterface::setPropertyValues().
-   */
-  public function setPropertyValues($values) {
-    foreach ($values as $name => $value) {
-      $this->get($name)->setValue($value);
-    }
   }
 
   /**

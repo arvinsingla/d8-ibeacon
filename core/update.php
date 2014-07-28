@@ -14,8 +14,9 @@
  * back to its original state!
  */
 
-use Drupal\Component\Utility\Settings;
 use Drupal\Core\DrupalKernel;
+use Drupal\Core\Page\DefaultHtmlPageRenderer;
+use Drupal\Core\Site\Settings;
 use Drupal\Core\Update\Form\UpdateScriptSelectionForm;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -24,7 +25,7 @@ use Symfony\Component\DependencyInjection\Reference;
 // Change the directory to the Drupal root.
 chdir('..');
 
-require_once __DIR__ . '/vendor/autoload.php';
+$autoloader = require_once __DIR__ . '/vendor/autoload.php';
 
 // Exit early if an incompatible PHP version would cause fatal errors.
 // The minimum version is specified explicitly, as DRUPAL_MINIMUM_PHP is not
@@ -56,8 +57,6 @@ function update_selection_page() {
 
   $build = \Drupal::formBuilder()->getForm('Drupal\Core\Update\Form\UpdateScriptSelectionForm');
   $build['#title'] = 'Drupal database update';
-
-  update_task_list('select');
 
   return $build;
 }
@@ -97,8 +96,6 @@ function update_flush_all_caches() {
  * Displays results of the update script with any accompanying errors.
  */
 function update_results_page() {
-
-  update_task_list();
   // Report end result.
   if (\Drupal::moduleHandler()->moduleExists('dblog') && user_access('access site reports')) {
     $log_message = ' All errors have been <a href="' . base_path() . '?q=admin/reports/dblog">logged</a>.';
@@ -120,7 +117,7 @@ function update_results_page() {
     $output .= '</p>';
   }
 
-  if (settings()->get('update_free_access')) {
+  if (Settings::get('update_free_access')) {
     $output .= "<p><strong>Reminder: don't forget to set the <code>\$settings['update_free_access']</code> value in your <code>settings.php</code> file back to <code>FALSE</code>.</strong></p>";
   }
 
@@ -200,7 +197,6 @@ function update_info_page() {
   $keyvalue->get('update')->deleteAll();
   $keyvalue->get('update_available_release')->deleteAll();
 
-  update_task_list('info');
   $token = drupal_get_token('update');
   $output = '<p>Use this utility to update your database whenever a new release of Drupal or a module is installed.</p><p>For more detailed information, see the <a href="http://drupal.org/upgrade">upgrading handbook</a>. If you are unsure what these terms mean you should probably contact your hosting provider.</p>';
   $output .= "<ol>\n";
@@ -211,7 +207,7 @@ function update_info_page() {
   $output .= "</ol>\n";
   $output .= "<p>When you have performed the steps above, you may proceed.</p>\n";
   $form_action = check_url(drupal_current_script_url(array('op' => 'selection', 'token' => $token)));
-  $output .= '<form method="post" action="' . $form_action . '"><p><input type="submit" value="Continue" class="form-submit button button-primary" /></p></form>';
+  $output .= '<form method="post" action="' . $form_action . '"><div class="form-actions form-wrapper" id="edit-actions"><input type="submit" value="Continue" class="button button--primary form-submit" /></div></form>';
   $output .= "\n";
 
   $build = array(
@@ -230,7 +226,7 @@ function update_info_page() {
 function update_access_denied_page() {
   drupal_add_http_header('Status', '403 Forbidden');
   header(\Drupal::request()->server->get('SERVER_PROTOCOL') . ' 403 Forbidden');
-  watchdog('access denied', 'update.php', NULL, WATCHDOG_WARNING);
+  \Drupal::logger('access denied')->warning('update.php');
   $output = '<p>Access denied. You are not authorized to access this page. Log in using either an account with the <em>administer software updates</em> permission or the site maintenance account (the account you created during installation). If you cannot log in, you will have to edit <code>settings.php</code> to bypass this access check. To do this:</p>
 <ol>
  <li>With a text editor find the settings.php file on your system. From the main Drupal directory that you installed all the files into, go to <code>sites/your_site_name</code> if such directory exists, or else to <code>sites/default</code> which applies otherwise.</li>
@@ -256,7 +252,7 @@ function update_access_allowed() {
   $user = \Drupal::currentUser();
 
   // Allow the global variable in settings.php to override the access check.
-  if (settings()->get('update_free_access')) {
+  if (Settings::get('update_free_access')) {
     return TRUE;
   }
   // Calls to user_access() might fail during the Drupal 6 to 7 update process,
@@ -292,8 +288,7 @@ function update_task_list($active = NULL) {
     '#items' => $tasks,
     '#active' => $active,
   );
-
-  drupal_add_region_content('sidebar_first', drupal_render($task_list));
+  return $task_list;
 }
 
 // Some unavoidable errors happen because the database is not yet up-to-date.
@@ -302,18 +297,17 @@ ini_set('display_errors', FALSE);
 
 // We prepare a minimal bootstrap for the update requirements check to avoid
 // reaching the PHP memory limit.
-require_once __DIR__ . '/includes/bootstrap.inc';
 require_once __DIR__ . '/includes/update.inc';
-require_once __DIR__ . '/includes/common.inc';
-require_once __DIR__ . '/includes/file.inc';
-require_once __DIR__ . '/includes/unicode.inc';
 require_once __DIR__ . '/includes/install.inc';
-require_once __DIR__ . '/includes/schema.inc';
-// Bootstrap to configuration.
-drupal_bootstrap(DRUPAL_BOOTSTRAP_CONFIGURATION);
 
-// Bootstrap the database.
-require_once __DIR__ . '/includes/database.inc';
+$request = Request::createFromGlobals();
+$kernel = DrupalKernel::createFromRequest($request, $autoloader, 'update', FALSE);
+
+// Enable UpdateServiceProvider service overrides.
+// @see update_flush_all_caches()
+$GLOBALS['conf']['container_service_providers']['UpdateServiceProvider'] = 'Drupal\Core\DependencyInjection\UpdateServiceProvider';
+$GLOBALS['conf']['update_service_provider_overrides'] = TRUE;
+$kernel->boot();
 
 // Updating from a site schema version prior to 8000 should block the update
 // process. Ensure that the site is not attempting to update a database
@@ -326,27 +320,10 @@ if (db_table_exists('system')) {
   }
 }
 
-// Enable UpdateServiceProvider service overrides.
-// @see update_flush_all_caches()
-$GLOBALS['conf']['container_service_providers']['UpdateServiceProvider'] = 'Drupal\Core\DependencyInjection\UpdateServiceProvider';
-$GLOBALS['conf']['update_service_provider_overrides'] = TRUE;
-
-// module.inc is not yet loaded but there are calls to module_config_sort()
-// below.
-require_once __DIR__ . '/includes/module.inc';
-
-$settings = settings()->getAll();
-new Settings($settings);
-$kernel = new DrupalKernel('update', drupal_classloader(), FALSE);
-$kernel->boot();
-$request = Request::createFromGlobals();
-\Drupal::getContainer()->set('request', $request);
+$kernel->prepareLegacyRequest($request);
 
 // Determine if the current user has access to run update.php.
-drupal_bootstrap(DRUPAL_BOOTSTRAP_PAGE_CACHE);
-
-require_once DRUPAL_ROOT . '/' . settings()->get('session_inc', 'core/includes/session.inc');
-drupal_session_initialize();
+\Drupal::service('session_manager')->initialize();
 
 // Ensure that URLs generated for the home and admin pages don't have 'update.php'
 // in them.
@@ -382,13 +359,13 @@ if (is_null($op) && update_access_allowed()) {
   install_goto('core/update.php?op=info');
 }
 
-drupal_bootstrap(DRUPAL_BOOTSTRAP_FULL);
 drupal_maintenance_theme();
 
 // Turn error reporting back on. From now on, only fatal errors (which are
 // not passed through the error handler) will cause a message to be printed.
 ini_set('display_errors', TRUE);
 
+$regions = array();
 
 // Only proceed with updates if the user is allowed to run them.
 if (update_access_allowed()) {
@@ -413,6 +390,7 @@ if (update_access_allowed()) {
     case 'selection':
       $token = $request->query->get('token');
       if (isset($token) && drupal_valid_token($token, 'update')) {
+        $regions['sidebar_first'] = update_task_list('select');
         $output = update_selection_page();
         break;
       }
@@ -420,6 +398,7 @@ if (update_access_allowed()) {
     case 'Apply pending updates':
       $token = $request->query->get('token');
       if (isset($token) && drupal_valid_token($token, 'update')) {
+        $regions['sidebar_first'] = update_task_list('run');
         // Generate absolute URLs for the batch processing (using $base_root),
         // since the batch API will pass them to url() which does not handle
         // update.php correctly by default.
@@ -430,16 +409,18 @@ if (update_access_allowed()) {
       }
 
     case 'info':
+      $regions['sidebar_first'] = update_task_list('info');
       $output = update_info_page();
       break;
 
     case 'results':
+      $regions['sidebar_first'] = update_task_list();
       $output = update_results_page();
       break;
 
     // Regular batch ops : defer to batch processing API.
     default:
-      update_task_list('run');
+      $regions['sidebar_first'] = update_task_list('run');
       $output = _batch_page($request);
       break;
   }
@@ -449,7 +430,7 @@ else {
 }
 if (isset($output) && $output) {
   // Explicitly start a session so that the update.php token will be accepted.
-  drupal_session_start();
+  \Drupal::service('session_manager')->start();
   // We defer the display of messages until all updates are done.
   $progress_page = ($batch = batch_get()) && isset($batch['running']);
   if ($output instanceof Response) {
@@ -457,18 +438,8 @@ if (isset($output) && $output) {
   }
   else {
     drupal_add_http_header('Content-Type', 'text/html; charset=utf-8');
-    $maintenance_page = array(
-      '#theme' => 'maintenance_page',
-      // $output has to be rendered here, because the maintenance page template
-      // is not wrapped into the html template, which means that any #attached
-      // libraries in $output will not be loaded, because the wrapping HTML has
-      // been printed already.
-      '#content' => drupal_render($output),
+    print DefaultHtmlPageRenderer::renderPage($output, $output['#title'], 'maintenance', $regions + array(
       '#show_messages' => !$progress_page,
-    );
-    if (isset($output['#title'])) {
-      $maintenance_page['#page']['#title'] = $output['#title'];
-    }
-    print drupal_render($maintenance_page);
+    ));
   }
 }

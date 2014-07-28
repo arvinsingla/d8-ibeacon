@@ -13,7 +13,7 @@ use Drupal\Tests\UnitTestCase;
 /**
  * Tests the Translation annotation.
  *
- * @covers \Drupal\Core\Annotation\Translation.
+ * @covers \Drupal\Core\Annotation\Translation
  */
 class TranslationTest extends UnitTestCase {
 
@@ -62,7 +62,7 @@ class TranslationTest extends UnitTestCase {
 
     $annotation = new Translation($values);
 
-    $this->assertSame($expected, $annotation->get());
+    $this->assertSame($expected, (string) $annotation->get());
   }
 
   /**

@@ -5,8 +5,7 @@
  *   Batch process to check the availability of remote or local po files.
  */
 
-use Guzzle\Http\Exception\BadResponseException;
-use Guzzle\Http\Exception\RequestException;
+use GuzzleHttp\Exception\RequestException;
 
 /**
  * Load the common translation API.
@@ -33,7 +32,7 @@ require_once __DIR__ . '/locale.translation.inc';
  *     Optional, defaults to TRUE.
  * @param array $context
  *   The batch context.
-*/
+ */
 function locale_translation_batch_status_check($project, $langcode, $options = array(), &$context) {
   $failure = $checked = FALSE;
   $options += array(
@@ -229,11 +228,9 @@ function locale_translation_batch_fetch_finished($success, $results) {
  *   TRUE if the file is not found. FALSE if a fault occurred.
  */
 function locale_translation_http_check($uri) {
-
+  $logger = \Drupal::logger('locale');
   try {
-    $response = \Drupal::httpClient()
-      ->head($uri)
-      ->send();
+    $response = \Drupal::httpClient()->head($uri);
     $result = array();
 
     // Return the effective URL if it differs from the requested.
@@ -241,10 +238,10 @@ function locale_translation_http_check($uri) {
       $result['location'] = $response->getEffectiveUrl();
     }
 
-    $result['last_modified'] = $response->getLastModified() ? strtotime($response->getLastModified()) : 0;
+    $result['last_modified'] = $response->hasHeader('Last-Modified') ? strtotime($response->getHeader('Last-Modified')) : 0;
     return $result;
   }
-  catch (BadResponseException $e) {
+  catch (RequestException $e) {
     // Handle 4xx and 5xx http responses.
     $response = $e->getResponse();
     if ($response->getStatusCode() == 404) {
@@ -253,16 +250,12 @@ function locale_translation_http_check($uri) {
       // theme does not define the location of a translation file. By default
       // the file is checked at the translation server, but it will not be
       // found there.
-      watchdog('locale', 'Translation file not found: @uri.', array('@uri' => $uri));
+      $logger->notice('Translation file not found: @uri.', array('@uri' => $uri));
       return TRUE;
     }
-    watchdog('locale', 'HTTP request to @url failed with error: @error.', array('@url' => $uri, '@error' => $response->getStatusCode() . ' ' . $response->getReasonPhrase()));
+    $logger->notice('HTTP request to @url failed with error: @error.', array('@url' => $uri, '@error' => $response->getStatusCode() . ' ' . $response->getReasonPhrase()));
   }
-  catch (RequestException $e) {
-    // Handle connection problems and cURL specific errors (CurlException) and
-    // other http related errors.
-    watchdog('locale', 'HTTP request to @url failed with error: @error.', array('@url' => $uri, '@error' => $e->getMessage()));
-  }
+
   return FALSE;
 }
 
@@ -292,6 +285,6 @@ function locale_translation_download_source($source_file, $directory = 'temporar
     $file->timestamp = filemtime($uri);
     return $file;
   }
-  watchdog('locale', 'Unable to download translation file @uri.', array('@uri' => $source_file->uri), WATCHDOG_ERROR);
+  \Drupal::logger('locale')->error('Unable to download translation file @uri.', array('@uri' => $source_file->uri));
   return FALSE;
 }

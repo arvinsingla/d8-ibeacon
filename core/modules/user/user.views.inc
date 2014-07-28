@@ -110,8 +110,8 @@ function user_views_data() {
 
   // Note that this field implements field level access control.
   $data['users']['mail'] = array(
-    'title' => t('E-mail'),
-    'help' => t('E-mail address for a given user. This field is normally not shown to users, so be cautious when using it.'),
+    'title' => t('Email'),
+    'help' => t('Email address for a given user. This field is normally not shown to users, so be cautious when using it.'),
     'field' => array(
       'id' => 'user_mail',
     ),
@@ -379,4 +379,13 @@ function user_views_data_alter(&$data) {
       'id' => 'user_bulk_form',
     ),
   );
+}
+
+/**
+ * Implements hook_views_plugins_argument_validator_alter().
+ */
+function user_views_plugins_argument_validator_alter(array &$plugins) {
+  $plugins['entity:user']['title'] = t('User ID');
+  $plugins['entity:user']['class'] = 'Drupal\user\Plugin\views\argument_validator\User';
+  $plugins['entity:user']['provider'] = 'user';
 }

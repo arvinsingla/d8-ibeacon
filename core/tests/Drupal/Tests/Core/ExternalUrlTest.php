@@ -64,9 +64,7 @@ class ExternalUrlTest extends UnitTestCase {
     $this->urlGenerator = $this->getMock('Drupal\Core\Routing\UrlGeneratorInterface');
     $this->urlGenerator->expects($this->any())
       ->method('generateFromPath')
-      ->will($this->returnCallback(function ($path) {
-        return $path;
-      }));
+      ->will($this->returnArgument(0));
 
     $this->router = $this->getMock('Drupal\Tests\Core\Routing\TestRouterInterface');
     $container = new ContainerBuilder();
@@ -142,9 +140,8 @@ class ExternalUrlTest extends UnitTestCase {
    */
   public function testToArray(Url $url) {
     $expected = array(
-      'route_name' => '',
-      'route_parameters' => array(),
-      'options' => array(),
+      'path' => $this->path,
+      'options' => array('external' => TRUE),
     );
     $this->assertSame($expected, $url->toArray());
   }
@@ -154,10 +151,12 @@ class ExternalUrlTest extends UnitTestCase {
    *
    * @depends testCreateFromPath
    *
+   * @expectedException \UnexpectedValueException
+   *
    * @covers ::getRouteName()
    */
   public function testGetRouteName(Url $url) {
-    $this->assertSame('', $url->getRouteName());
+    $url->getRouteName();
   }
 
   /**
@@ -165,10 +164,12 @@ class ExternalUrlTest extends UnitTestCase {
    *
    * @depends testCreateFromPath
    *
+   * @expectedException \UnexpectedValueException
+   *
    * @covers ::getRouteParameters()
    */
   public function testGetRouteParameters(Url $url) {
-    $this->assertSame(array(), $url->getRouteParameters());
+    $url->getRouteParameters();
   }
 
   /**
@@ -182,6 +183,17 @@ class ExternalUrlTest extends UnitTestCase {
    */
   public function testGetInternalPath(Url $url) {
     $this->assertNull($url->getInternalPath());
+  }
+
+  /**
+   * Tests the getPath() method.
+   *
+   * @depends testCreateFromPath
+   *
+   * @covers ::getPath()
+   */
+  public function testGetPath(Url $url) {
+    $this->assertNotNull($url->getPath());
   }
 
   /**

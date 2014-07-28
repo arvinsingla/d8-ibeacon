@@ -7,14 +7,27 @@
 
 namespace Drupal\Core\Config\Entity;
 
+use Drupal\Component\Plugin\ConfigurablePluginInterface;
+use Drupal\Component\Utility\String;
+use Drupal\Core\Cache\Cache;
+use Drupal\Core\Config\Schema\SchemaIncompleteException;
 use Drupal\Core\Entity\Entity;
-use Drupal\Core\Entity\EntityStorageControllerInterface;
 use Drupal\Core\Config\ConfigDuplicateUUIDException;
+use Drupal\Core\Entity\EntityStorageInterface;
+use Drupal\Core\Entity\EntityWithPluginBagsInterface;
+use Drupal\Core\Language\LanguageInterface;
+use Drupal\Core\Plugin\PluginDependencyTrait;
 
 /**
  * Defines a base configuration entity class.
+ *
+ * @ingroup entity_api
  */
 abstract class ConfigEntityBase extends Entity implements ConfigEntityInterface {
+
+  use PluginDependencyTrait {
+    addDependency as addDependencyTrait;
+  }
 
   /**
    * The original ID of the configuration entity.
@@ -33,10 +46,6 @@ abstract class ConfigEntityBase extends Entity implements ConfigEntityInterface 
    * This is needed when the entity utilizes a PluginBag, to dictate where the
    * plugin configuration should be stored.
    *
-   * @todo Move this to a trait along with
-   *   \Drupal\Core\Config\Entity\EntityWithPluginBagInterface, and give it a
-   *   default value of 'configuration'.
-   *
    * @var string
    */
   protected $pluginConfigKey;
@@ -46,14 +55,14 @@ abstract class ConfigEntityBase extends Entity implements ConfigEntityInterface 
    *
    * @var bool
    */
-  public $status = TRUE;
+  protected $status = TRUE;
 
   /**
    * The UUID for this entity.
    *
    * @var string
    */
-  public $uuid;
+  protected $uuid;
 
   /**
    * Whether the config is being created, updated or deleted through the
@@ -62,6 +71,20 @@ abstract class ConfigEntityBase extends Entity implements ConfigEntityInterface 
    * @var bool
    */
   private $isSyncing = FALSE;
+
+  /**
+   * Whether the config is being deleted by the uninstall process.
+   *
+   * @var bool
+   */
+  private $isUninstalling = FALSE;
+
+  /**
+   * The language code of the entity's default language.
+   *
+   * @var string
+   */
+  protected $langcode = LanguageInterface::LANGCODE_NOT_SPECIFIED;
 
   /**
    * Overrides Entity::__construct().
@@ -90,7 +113,7 @@ abstract class ConfigEntityBase extends Entity implements ConfigEntityInterface 
   public function setOriginalId($id) {
     $this->originalId = $id;
 
-    return $this;
+    return parent::setOriginalId($id);
   }
 
   /**
@@ -115,16 +138,17 @@ abstract class ConfigEntityBase extends Entity implements ConfigEntityInterface 
    * {@inheritdoc}
    */
   public function set($property_name, $value) {
-    // @todo When \Drupal\Core\Config\Entity\EntityWithPluginBagInterface moves
-    //   to a trait, switch to class_uses() instead.
-    if ($this instanceof EntityWithPluginBagInterface) {
-      if ($property_name == $this->pluginConfigKey) {
+    if ($this instanceof EntityWithPluginBagsInterface) {
+      $plugin_bags = $this->getPluginBags();
+      if (isset($plugin_bags[$property_name])) {
         // If external code updates the settings, pass it along to the plugin.
-        $this->getPluginBag()->setConfiguration($value);
+        $plugin_bags[$property_name]->setConfiguration($value);
       }
     }
 
     $this->{$property_name} = $value;
+
+    return $this;
   }
 
   /**
@@ -138,6 +162,8 @@ abstract class ConfigEntityBase extends Entity implements ConfigEntityInterface 
    * {@inheritdoc}
    */
   public function disable() {
+    // An entity was disabled, invalidate its own cache tag.
+    Cache::invalidateTags(array($this->entityTypeId => array($this->id())));
     return $this->setStatus(FALSE);
   }
 
@@ -161,6 +187,8 @@ abstract class ConfigEntityBase extends Entity implements ConfigEntityInterface 
    */
   public function setSyncing($syncing) {
     $this->isSyncing = $syncing;
+
+    return $this;
   }
 
   /**
@@ -168,6 +196,20 @@ abstract class ConfigEntityBase extends Entity implements ConfigEntityInterface 
    */
   public function isSyncing() {
     return $this->isSyncing;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function setUninstalling($uninstalling) {
+    $this->isUninstalling = $uninstalling;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function isUninstalling() {
+    return $this->isUninstalling;
   }
 
   /**
@@ -184,7 +226,7 @@ abstract class ConfigEntityBase extends Entity implements ConfigEntityInterface 
   /**
    * Helper callback for uasort() to sort configuration entities by weight and label.
    */
-  public static function sort($a, $b) {
+  public static function sort(ConfigEntityInterface $a, ConfigEntityInterface $b) {
     $a_weight = isset($a->weight) ? $a->weight : 0;
     $b_weight = isset($b->weight) ? $b->weight : 0;
     if ($a_weight == $b_weight) {
@@ -198,49 +240,93 @@ abstract class ConfigEntityBase extends Entity implements ConfigEntityInterface 
   /**
    * {@inheritdoc}
    */
-  public function getExportProperties() {
-    // Configuration objects do not have a schema. Extract all key names from
-    // class properties.
-    $class_info = new \ReflectionClass($this);
+  public function toArray() {
     $properties = array();
-    foreach ($class_info->getProperties(\ReflectionProperty::IS_PUBLIC) as $property) {
-      $name = $property->getName();
-      $properties[$name] = $this->get($name);
+    $config_name = $this->getEntityType()->getConfigPrefix() . '.' . $this->id();
+    $definition = $this->getTypedConfig()->getDefinition($config_name);
+    if (!isset($definition['mapping'])) {
+      throw new SchemaIncompleteException(String::format('Incomplete or missing schema for @config_name', array('@config_name' => $config_name)));
+    }
+    $id_key = $this->getEntityType()->getKey('id');
+    foreach (array_keys($definition['mapping']) as $name) {
+      // Special handling for IDs so that computed compound IDs work.
+      // @see \Drupal\entity\EntityDisplayBase::id()
+      if ($name == $id_key) {
+        $properties[$name] = $this->id();
+      }
+      else {
+        $properties[$name] = $this->get($name);
+      }
     }
     return $properties;
   }
 
   /**
+   * Gets the typed config manager.
+   *
+   * @return \Drupal\Core\Config\TypedConfigManagerInterface
+   */
+  protected function getTypedConfig() {
+    return \Drupal::service('config.typed');
+  }
+
+  /**
    * {@inheritdoc}
    */
-  public function preSave(EntityStorageControllerInterface $storage_controller) {
-    parent::preSave($storage_controller);
+  public function preSave(EntityStorageInterface $storage) {
+    parent::preSave($storage);
 
-    // @todo When \Drupal\Core\Config\Entity\EntityWithPluginBagInterface moves
-    //   to a trait, switch to class_uses() instead.
-    if ($this instanceof EntityWithPluginBagInterface) {
+    if ($this instanceof EntityWithPluginBagsInterface) {
       // Any changes to the plugin configuration must be saved to the entity's
       // copy as well.
-      $this->set($this->pluginConfigKey, $this->getPluginBag()->getConfiguration());
+      foreach ($this->getPluginBags() as $plugin_config_key => $plugin_bag) {
+        $this->set($plugin_config_key, $plugin_bag->getConfiguration());
+      }
     }
 
     // Ensure this entity's UUID does not exist with a different ID, regardless
     // of whether it's new or updated.
-    $matching_entities = $storage_controller->getQuery()
+    $matching_entities = $storage->getQuery()
       ->condition('uuid', $this->uuid())
       ->execute();
     $matched_entity = reset($matching_entities);
-    if (!empty($matched_entity) && ($matched_entity != $this->id())) {
-      throw new ConfigDuplicateUUIDException(format_string('Attempt to save a configuration entity %id with UUID %uuid when this UUID is already used for %matched', array('%id' => $this->id(), '%uuid' => $this->uuid(), '%matched' => $matched_entity)));
+    if (!empty($matched_entity) && ($matched_entity != $this->id()) && $matched_entity != $this->getOriginalId()) {
+      throw new ConfigDuplicateUUIDException(String::format('Attempt to save a configuration entity %id with UUID %uuid when this UUID is already used for %matched', array('%id' => $this->id(), '%uuid' => $this->uuid(), '%matched' => $matched_entity)));
     }
 
+    // If this entity is not new, load the original entity for comparison.
     if (!$this->isNew()) {
-      $original = $storage_controller->loadUnchanged($this->id());
+      $original = $storage->loadUnchanged($this->getOriginalId());
       // Ensure that the UUID cannot be changed for an existing entity.
       if ($original && ($original->uuid() != $this->uuid())) {
-        throw new ConfigDuplicateUUIDException(format_string('Attempt to save a configuration entity %id with UUID %uuid when this entity already exists with UUID %original_uuid', array('%id' => $this->id(), '%uuid' => $this->uuid(), '%original_uuid' => $original->uuid())));
+        throw new ConfigDuplicateUUIDException(String::format('Attempt to save a configuration entity %id with UUID %uuid when this entity already exists with UUID %original_uuid', array('%id' => $this->id(), '%uuid' => $this->uuid(), '%original_uuid' => $original->uuid())));
       }
     }
+    if (!$this->isSyncing()) {
+      // Ensure the correct dependencies are present. If the configuration is
+      // being written during a configuration synchronisation then there is no
+      // need to recalculate the dependencies.
+      $this->calculateDependencies();
+    }
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function calculateDependencies() {
+    // Dependencies should be recalculated on every save. This ensures stale
+    // dependencies are never saved.
+    $this->dependencies = array();
+    if ($this instanceof EntityWithPluginBagsInterface) {
+      // Configuration entities need to depend on the providers of any plugins
+      // that they store the configuration for.
+      foreach ($this->getPluginBags() as $plugin_bag) {
+        foreach ($plugin_bag as $instance) {
+          $this->calculatePluginDependencies($instance);
+        }
+      }
+    }
+    return $this->dependencies;
   }
 
   /**
@@ -262,6 +348,28 @@ abstract class ConfigEntityBase extends Entity implements ConfigEntityInterface 
    */
   public function url($rel = 'edit-form', $options = array()) {
     return parent::url($rel, $options);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function addDependency($type, $name) {
+    // A config entity is always dependent on its provider. There is no need to
+    // explicitly declare the dependency. An explicit dependency on Core, which
+    // provides some plugins, is also not needed.
+    // @see \Drupal\Core\Config\Entity\ConfigEntityDependency::hasDependency()
+    if ($type == 'module' && ($name == $this->getEntityType()->getProvider() || $name == 'Core')) {
+      return $this;
+    }
+
+    return $this->addDependencyTrait($type, $name);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getConfigDependencyName() {
+    return $this->getEntityType()->getConfigPrefix() . '.' . $this->id();
   }
 
 }

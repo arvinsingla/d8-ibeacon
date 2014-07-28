@@ -11,8 +11,8 @@
  * This version is made available under the GNU GPL License
  */
 
-use Guzzle\Http\Exception\BadResponseException;
-use Guzzle\Http\Exception\RequestException;
+use Drupal\Component\Utility\String;
+use GuzzleHttp\Exception\RequestException;
 
 /**
  * Turns a data structure into objects with 'data' and 'type' attributes.
@@ -123,7 +123,7 @@ function xmlrpc_value_get_xml($xmlrpc_value) {
     case 'struct':
       $return = '<struct>' . "\n";
       foreach ($xmlrpc_value->data as $name => $value) {
-        $return .= "  <member><name>" . check_plain($name) . "</name><value>";
+        $return .= "  <member><name>" . String::checkPlain($name) . "</name><value>";
         $return .= xmlrpc_value_get_xml($value) . "</value></member>\n";
       }
       $return .= '</struct>';
@@ -561,15 +561,11 @@ function _xmlrpc($url, array $args, array $headers = array()) {
     $args = $args[$method];
   }
   $xmlrpc_request = xmlrpc_request($method, $args);
-  $request = \Drupal::httpClient()->post($url, $headers, $xmlrpc_request->xml);
-  $request->setHeader('Content-Type', 'text/xml');
+
+  $headers['Content-Type'] = 'text/xml';
+
   try {
-    $response = $request->send();
-  }
-  catch (BadResponseException $exception) {
-    $response = $exception->getResponse();
-    xmlrpc_error($response->getStatusCode(), $response->getReasonPhrase());
-    return FALSE;
+    $response = \Drupal::httpClient()->post($url, array('headers' => $headers, 'body' => $xmlrpc_request->xml));
   }
   catch (RequestException $exception) {
     xmlrpc_error(NULL, $exception->getMethod());
