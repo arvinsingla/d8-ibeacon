@@ -38,6 +38,20 @@ function node_views_data() {
     'field' => 'nid',
   );
 
+  $data['node']['uuid'] = array(
+    'title' => t('UUID'),
+    'help' => t('The node UUID.'),
+    'field' => array(
+      'id' => 'node',
+    ),
+    'filter' => array(
+      'id' => 'numeric',
+    ),
+    'sort' => array(
+      'id' => 'standard',
+    ),
+  );
+
   $data['node']['nid'] = array(
     'title' => t('Nid'),
     'help' => t('The node ID.'),
