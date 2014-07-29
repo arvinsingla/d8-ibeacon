@@ -1,0 +1,22 @@
+<?php
+/**
+ * @file
+ * In/Out General module file.
+ */
+
+/**
+ * Implements hook_ENTITY_TYPE_insert().
+ */
+function inout_general_node_insert($node) {
+  // If we are creating an event update the person to match the status.
+  if ($node->bundle() == 'event') {
+    // Pull data from our new node.
+    $nid = $node->field_event_person->target_id;
+    $status = $node->field_event_in_office->value;
+    // Load the entity reference node.
+    $person = \Drupal\node\Entity\Node::load($nid);
+    // Assign new status value and save.
+    $person->field_person_in_office->value = $status;
+    $person->save();
+  }
+}
